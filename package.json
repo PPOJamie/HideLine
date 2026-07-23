@@ -1,0 +1,26 @@
+{
+  "name": "hideline-london-companion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "An installable, multiplayer-ready companion PWA for a full-day London transit hide-and-seek game.",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "start": "node scripts/dev-server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "validate": "node scripts/validate-data.mjs",
+    "check": "npm run validate && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "hide-and-seek",
+    "london",
+    "transit-game",
+    "pwa",
+    "supabase",
+    "github-pages"
+  ],
+  "license": "MIT"
+}
