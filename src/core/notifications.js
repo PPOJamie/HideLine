@@ -14,19 +14,20 @@ function currentRole(state) {
 }
 
 function locationSuffix(payload = {}) {
-  const locations = Array.isArray(payload.locations) ? payload.locations : [];
-  if (!locations.length) return "";
-  return ` · ${locations.map((location) => `${compact(location.label, "Pin")}: ${compact(location.text)}`).join(" · ")}`;
+  const locations = Array.isArray(payload.locations) ? payload.locations : questionLocations(payload);
+  if (locations.length) {
+    return ` · ${locations.map((location) => `${compact(location.label, "Pin")}: ${compact(location.text)}`).join(" · ")}`;
+  }
+  const summary = compact(payload.locationSummary || payload.location_summary);
+  return summary ? ` · ${summary}` : "";
 }
 
 export function notificationForPendingQuestion(record, state) {
   const { isHider } = currentRole(state);
   if (!record || record.status !== "pending" || !isHider) return null;
-  const locations = questionLocations(record);
-  const locationText = locations.length ? ` · ${locations.map((location) => `${compact(location.label, "Pin")}: ${compact(location.text)}`).join(" · ")}` : "";
   return {
     title: "Question to answer",
-    body: `${compact(record.questionName, "New question")}: ${compact(record.prompt, "Open Questions to answer.")}${locationText}`,
+    body: `${compact(record.questionName, "New question")}: ${compact(record.prompt, "Open Questions to answer.")}${locationSuffix(record)}`,
     tone: "question",
     iconName: "questions",
     urgent: true,

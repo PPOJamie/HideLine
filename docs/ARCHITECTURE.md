@@ -4,7 +4,7 @@
 
 HideLine is a static progressive web app. `index.html` loads deploy-time public configuration, the CSS bundle and `src/app.js`. The app renders semantic HTML into one shell and keeps serialisable game state in a small observable store.
 
-No framework build output is committed or required. GitHub Pages can serve the repository directly.
+No framework build output is committed or required. GitHub Pages can serve the repository directly. The visible game-day shell has only three primary destinations—Game, Questions and Map—while lower-frequency controls remain in collapsed panels or settings.
 
 ## State boundaries
 
@@ -30,8 +30,8 @@ The client deliberately remains usable when Connected Mode is unavailable: Local
 
 The engine supports two location semantics:
 
-- **Mobile snapshot:** before endgame, every answer is evaluated independently. A station remains possible when its zone contains at least one valid point for each answer, even if those points differ between questions. The normal game-day map automatically shows one combined evidence overlay that greys a cell when any usable answer excludes it. That combined overlay is visual only and is deliberately not fed back into mobile station elimination as a false fixed-location intersection.
-- **Endgame locked:** all locked location constraints are intersected at the same cell because the hider is fixed. The Endgame view renders only the selected station circle and its common surviving mask. Earlier mobile-snapshot answers are also carried into the view as a separate historical-evidence mask, while station-level facts continue to act as hard filters; this preserves usefulness without falsely treating a movable hider as fixed before Endgame.
+- **Mobile snapshot:** before endgame, every answer is evaluated independently. A station remains possible when its zone contains at least one valid point for each answer, even if those points differ between questions. The normal seeker view always displays a combined evidence overlay that greys a cell when any ready answer excludes it. The underlying engine can still resolve individual constraints for auditing, but technical layer selection is not exposed in the main interface. The combined overlay is visual only and is deliberately not fed back into mobile station elimination as a false fixed-location intersection.
+- **Endgame locked:** all locked location constraints are intersected at the same cell because the hider is fixed. The Endgame view renders only the selected station circle and its common surviving mask. Earlier mobile-snapshot answers are carried into the same view as a separate blue historical-evidence mask, while station-level facts continue to act as hard filters.
 
 Station-level filters such as station-name length and transit stops operate directly on the station catalogue. Area filters include Radar, Thermometer, exact-reference Measuring, nearest-feature Matching/Measuring, administrative-region matching, nearest-station Measuring, Thames-side matching, Tentacles and manual circles/polygons.
 
@@ -60,7 +60,7 @@ The authoritative game layer is a Google My Maps embed/link. The interactive pla
 
 The mask renderer uses coarser cells when many circles are visible, finer cells for one selected answer circle and the finest cells in Endgame mode. In a combined overlay, the cell data also records how many answers exclude each point so the renderer can increase grey opacity for repeated independent exclusions. The same mask plans are rendered as clipped SVG polygons by the built-in vector fallback, so the allowed/excluded view does not depend on third-party map tiles.
 
-All 100 station centres are embedded in `src/data/station-geo.js`. The Zone Check service uses those coordinates first, with TfL/Nominatim retained only as fallback resolvers. `src/data/thames-centreline.js` contains the 57 bridge-anchored control points, interpolated into a 614-point planning guide at roughly 35 m spacing; online Leaflet maps leave the OpenStreetMap water polygon unobstructed, while the same guide supports Thames-side calculations and the offline vector fallback. Imported spatial geometry remains a reference dataset for deductions; it does not replace the visible authoritative My Maps layer.
+All 100 station centres are embedded in `src/data/station-geo.js`. The Zone Check service uses those coordinates first, with TfL/Nominatim retained only as fallback resolvers. `src/data/thames-centreline.js` contains 57 bridge-anchored control points interpolated into a 614-point planning guide at roughly 35 m spacing. Online Leaflet maps leave the OpenStreetMap water polygon unobstructed; the same guide drives Thames-side calculations and the offline vector fallback. Imported spatial geometry remains a reference dataset for deductions; it does not replace the visible authoritative My Maps layer.
 
 ## Offline behavior
 
@@ -68,6 +68,6 @@ The service worker caches the same-origin application shell and source modules. 
 
 ## Testing strategy
 
-Core tests cover score ordering, 500 m distance behavior, pause accounting, station-name rules, repeated-question rewards, embedded coordinate completeness, 97-point viability sampling, full-circle visual-cell coverage, mobile-versus-locked movement semantics, combined all-answer masks, all-55-question mapping, manual polygons, nearest-feature regions, administrative polygons, Tentacles and Endgame intersections. Rendered-HTML tests verify the four-tab shell, the simplified question flow, the combined map, the explicit Endgame exit control and the standalone coordinate-picker dialog. `scripts/validate-data.mjs` checks the 100-station catalogue, embedded coordinates, question definitions, rail-line presets, planning polygon and install assets.
+Core tests cover score ordering, 500 m distance behavior, pause accounting, station-name rules, repeated-question rewards, embedded coordinate completeness, 97-point viability sampling, full-circle visual-cell coverage, mobile-versus-locked movement semantics, combined all-answer masks, all-55-question mapping, manual polygons, nearest-feature regions, administrative polygons, Tentacles and Endgame intersections. Rendered-HTML tests verify the combined-map default, the explicit Endgame exit control, earlier-clue messaging, coordinate-picker controls and the three-item primary navigation. `scripts/validate-data.mjs` checks the 100-station catalogue, embedded coordinates, question definitions, rail-line presets, planning polygon and install assets.
 
-The release process also runs JavaScript syntax checks, ZIP integrity checks and a clean-extraction `npm run check` before delivery.
+The release process also runs JavaScript syntax checks, clean-extraction validation and desktop/mobile browser smoke tests for the three-screen navigation, collapsed Game kit, question answering, map-information modal, combined masks, Endgame reset, coordinate picking and horizontal overflow.

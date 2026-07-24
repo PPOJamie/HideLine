@@ -44,6 +44,6 @@ No database migration is required when upgrading from HideLine 1.1 or later. Ver
 
 Existing Supabase projects that show `column reference game_id is ambiguous` when a second device joins should run `migrations/003_fix_join_game_ambiguity.sql` once. The migration replaces only the `join_game` function and preserves all room data. Fresh installations using the current `001_hideline.sql` already include the corrected function.
 
-## Upgrade to HideLine 2.1.2
+## Upgrade to HideLine 2.2.1
 
-No database migration is required for the Connected Mode map-performance update. Realtime positions, presence and other high-frequency events are handled more selectively by the client.
+No database migration is required for live alerts, visible question coordinates, notification reliability or the Endgame colour update. Version 2.2.1 is a client and deployment repair; existing games and room codes remain compatible.

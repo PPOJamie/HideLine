@@ -2,6 +2,30 @@
 
 All notable changes to HideLine are documented here.
 
+## 2.2.1 — Coordinate and notification deployment repair
+
+- Stored a canonical, serialisable coordinate list on every newly asked question, while retaining backward-compatible extraction from older deduction records.
+- Added a visible Google Maps preview immediately after a point is chosen in the question form.
+- Rechecked pending questions on initial connection, every five seconds, when the tab becomes visible and when the window regains focus, so an interrupted Realtime event cannot suppress the hider alert.
+- Added a **Test pop-up** control and displayed the loaded app version in notification settings.
+- Added an explicit deployment-version guard that warns when GitHub Pages serves a new `index.html` with old JavaScript or CSS.
+- Added repository-layout validation that blocks deployment when `index.html` is replaced by documentation or nested source files are flattened into the repository root.
+- Fixed blank required coordinate fields being interpreted as `0,0`, made canonical location serialisation idempotent, and retained shared pins for judgement-based questions.
+- Expanded the regression suite to 50 checks. No Supabase migration is required.
+
+## 2.2.0 — Live alerts, visible pins and clearer Endgame colours
+
+- Added role-aware in-app notification pop-ups for new questions, received answers, releases, pauses, Endgame changes, transit notices, safety checks and round events.
+- Added optional browser/device notifications while HideLine remains open in the background, with an explicit permission control under Settings.
+- Added actionable **Answer now** alerts for the active hider team without notifying the seeker device that asked the question.
+- Displayed seeker, journey-start, journey-end and reference coordinates directly on active questions and in question history.
+- Made each displayed coordinate open the exact point in Google Maps in a new tab.
+- Included location summaries in Connected Mode question events so remote alerts can show the shared pin.
+- Recoloured the Endgame fixed-position mask to bright green for possible areas and strong red for excluded areas.
+- Changed earlier mobile-location evidence to purple hatching so it cannot be confused with either current Endgame result.
+- Added notification-click handling, offline caching for the new modules and regression tests for alerts, pins and Endgame colours.
+- Updated the PWA cache to 2.2.0. No Supabase migration is required.
+
 ## 2.1.3 — Interface consistency and cache repair
 
 - Restored the intended spacing, typography, card layout and activity timeline after the 2.1.2 performance update.

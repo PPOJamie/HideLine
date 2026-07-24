@@ -174,7 +174,7 @@ function renderMapExplanation(model) {
   if (endgame) {
     const current = model.constraints.filter(isCurrentEndgameConstraint).length;
     const earlier = model.constraints.filter(isEarlierEndgameConstraint).length;
-    return `<div class="callout ${current || earlier ? "" : "warning"}">${icon(current ? "target" : "info")}<p><strong>All earlier answers are carried into Endgame automatically.</strong>${current ? ` ${current} station or fixed-spot answer${current === 1 ? " is" : "s are"} shown as hard grey exclusions.` : " No hard current exclusion is available yet."}${earlier ? ` ${earlier} pre-Endgame location clue${earlier === 1 ? " appears" : "s appear"} as blue hatching because the hider could move after answering.` : ""} You do not need to ask the questions again.</p></div>`;
+    return `<div class="callout ${current || earlier ? "" : "warning"}">${icon(current ? "target" : "info")}<p><strong>All earlier answers are carried into Endgame automatically.</strong>${current ? ` ${current} station or fixed-spot answer${current === 1 ? " is" : "s are"} shown as hard red exclusions.` : " No hard current exclusion is available yet."}${earlier ? ` ${earlier} pre-Endgame location clue${earlier === 1 ? " appears" : "s appear"} as purple hatching because the hider could move after answering.` : ""} You do not need to ask the questions again.</p></div>`;
   }
   if (!model.answerConstraints.length) return `<div class="callout warning">${icon("info")}<p><strong>No area answers yet.</strong>The station circles are ready. Ask a Radar, Thermometer, Measuring, Matching or Tentacle question to begin greying out impossible areas.</p></div>`;
   return `<div class="callout">${icon("layers")}<p><strong>Everything is combined automatically.</strong>Green survives every map-ready answer. Grey is excluded by at least one answer. Amber still needs map data or player judgement.</p></div>`;
@@ -235,9 +235,9 @@ export function renderDeductionView(state) {
     ${renderMapHeader(model)}
     <section class="card card-pad stack simple-deduction-map-card">
       ${renderMapControls(model)}
-      <div class="map-shell deduction-map-shell"><div id="deduction-map" role="application" aria-label="Live deduction map"></div><div class="deduction-legend" aria-label="Map legend"><span class="legend-possible">${endgame ? "Possible now" : "Possible area"}</span>${endgame ? `<span class="legend-history">Earlier clue</span>` : ""}<span class="legend-partial">Needs data</span><span class="legend-eliminated">${endgame ? "Ruled out now" : "Excluded area"}</span></div></div>
+      <div class="map-shell deduction-map-shell"><div id="deduction-map" role="application" aria-label="Live deduction map"></div><div class="deduction-legend ${endgame ? "endgame-legend" : ""}" aria-label="Map legend"><span class="legend-possible">${endgame ? "Possible now" : "Possible area"}</span>${endgame ? `<span class="legend-history">Earlier clue</span>` : ""}<span class="legend-partial">Needs data</span><span class="legend-eliminated">${endgame ? "Ruled out now" : "Excluded area"}</span></div></div>
       ${renderMapExplanation(model)}
-      <p class="tiny muted">${endgame ? "Blue hatching preserves where an earlier answer ruled the hider out at that time; it is not treated as their final fixed position. " : ""}The cells are a planning aid clipped to each 500 m circle. Use the official game map for borderline paths and entrances.</p>
+      <p class="tiny muted">${endgame ? "Bright green is possible now, strong red is ruled out now, and purple hatching preserves where an earlier answer ruled the hider out at that time without treating it as the final fixed position. " : ""}The cells are a planning aid clipped to each 500 m circle. Use the official game map for borderline paths and entrances.</p>
     </section>
     ${renderRemainingStations(state, model)}
     ${renderAnswerLog(model)}

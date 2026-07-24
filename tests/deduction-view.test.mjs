@@ -64,7 +64,7 @@ test("the Endgame view keeps earlier answers and has one clear route back", () =
   assert.match(html, />\s*Back to all stations\s*</);
   assert.match(html, /All earlier answers are carried into Endgame automatically/);
   assert.match(html, /Earlier clue/);
-  assert.match(html, /blue hatching/);
+  assert.match(html, /purple hatching/);
   assert.match(html, /do not need to ask the questions again/i);
 });
 

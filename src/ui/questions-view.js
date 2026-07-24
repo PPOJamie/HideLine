@@ -3,6 +3,7 @@ import { PHASES } from "../core/constants.js";
 import { escapeHtml, relativeTime } from "../core/format.js";
 import { formatDuration, questionSecondsRemaining } from "../core/time.js";
 import { icon } from "./icons.js";
+import { renderQuestionLocations } from "./question-location.js";
 
 function categoryIcon(category) {
   const name = QUESTION_CATEGORIES[category]?.symbol || "questions";
@@ -30,7 +31,8 @@ function renderActiveQuestion(record, now, canAnswer) {
       <div class="question-countdown ${overdue ? "overdue" : ""}" data-question-countdown="${record.id}">${overdue ? `+${formatDuration(Math.abs(remaining))}` : formatDuration(remaining)}</div>
     </div>
     <div class="simple-question-prompt">${escapeHtml(record.prompt || definition.prompt)}</div>
-    ${record.note ? `<p class="muted small">${escapeHtml(record.note)}</p>` : ""}
+    ${renderQuestionLocations(record)}
+    ${record.note ? `<p class="muted small question-clarification"><strong>Question note:</strong> ${escapeHtml(record.note)}</p>` : ""}
     ${canAnswer ? `<div class="answer-grid simple-answer-grid">
       ${answerOptions.filter((option) => option !== "Photo submitted").map((option) => `<button type="button" class="answer-button" data-action="answer-question" data-question-instance="${record.id}" data-answer="${escapeHtml(option)}">${escapeHtml(option)}</button>`).join("")}
       ${definition.photo ? `<button type="button" class="answer-button" data-action="open-answer-photo" data-question-instance="${record.id}">${icon("camera")} Add photo</button>` : ""}
@@ -60,7 +62,7 @@ function renderHistory(state, now) {
       ${history.length ? `<div class="simple-list">${history.slice(0, 40).map((record) => {
         const definition = QUESTION_BY_ID.get(record.questionId) || record;
         const hasEvidence = Boolean(record.evidencePath || record.evidenceKey || record.evidenceDataUrl);
-        return `<div class="simple-list-row"><span><strong>${escapeHtml(record.questionName || definition.name)}</strong><small>${escapeHtml(record.answer || "No answer")} · ${relativeTime(record.askedAt, now)}${record.occurrence > 1 ? ` · repeat x${record.occurrence}` : ""}</small></span>${hasEvidence ? `<button class="button button-soft button-small" type="button" data-action="view-evidence" data-question-instance="${record.id}">${icon("camera")} Photo</button>` : ""}</div>`;
+        return `<div class="simple-list-row"><span><strong>${escapeHtml(record.questionName || definition.name)}</strong><small>${escapeHtml(record.answer || "No answer")} · ${relativeTime(record.askedAt, now)}${record.occurrence > 1 ? ` · repeat x${record.occurrence}` : ""}</small></span><span class="question-history-actions">${renderQuestionLocations(record, { compact: true })}${hasEvidence ? `<button class="button button-soft button-small" type="button" data-action="view-evidence" data-question-instance="${record.id}">${icon("camera")} Photo</button>` : ""}</span></div>`;
       }).join("")}</div>` : `<p class="muted">Completed questions will appear here.</p>`}
     </div>
   </details>`;

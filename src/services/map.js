@@ -35,10 +35,16 @@ const MASK_COLOURS = Object.freeze({
   unknown: { fill: "rgba(228, 161, 27, 0.30)", stroke: "rgba(151, 99, 0, 0.17)" }
 });
 
+const ENDGAME_MASK_COLOURS = Object.freeze({
+  allowed: { fill: "rgba(0, 196, 118, 0.66)", stroke: "rgba(0, 86, 48, 0.68)" },
+  excluded: { fill: "rgba(218, 24, 62, 0.82)", stroke: "rgba(103, 0, 24, 0.78)" },
+  unknown: { fill: "rgba(255, 184, 0, 0.62)", stroke: "rgba(128, 79, 0, 0.56)" }
+});
+
 const HISTORY_MASK = Object.freeze({
-  fill: "rgba(50, 105, 187, 0.10)",
-  stroke: "rgba(38, 81, 145, 0.46)",
-  hatch: "rgba(38, 81, 145, 0.42)"
+  fill: "rgba(109, 61, 176, 0.12)",
+  stroke: "rgba(87, 42, 148, 0.55)",
+  hatch: "rgba(87, 42, 148, 0.55)"
 });
 
 function excludedCellOpacity(cell) {
@@ -46,7 +52,18 @@ function excludedCellOpacity(cell) {
   return Math.min(0.84, 0.48 + Math.log2(count + 1) * 0.1);
 }
 
-function maskCellPalette(cell) {
+function maskCellPalette(cell, paletteMode = "default") {
+  if (paletteMode === "endgame") {
+    if (cell?.state === "excluded") {
+      const count = Math.max(1, Number(cell?.excludedByCount) || 1);
+      const opacity = Math.min(0.92, 0.78 + Math.log2(count + 1) * 0.035);
+      return {
+        fill: `rgba(218, 24, 62, ${opacity.toFixed(3)})`,
+        stroke: `rgba(103, 0, 24, ${Math.min(0.82, opacity * 0.88).toFixed(3)})`
+      };
+    }
+    return ENDGAME_MASK_COLOURS[cell?.state] || ENDGAME_MASK_COLOURS.unknown;
+  }
   if (cell?.state === "excluded") {
     const opacity = excludedCellOpacity(cell);
     return {
@@ -335,7 +352,7 @@ function drawConstraintOverlays(L, group, constraints, spatialFeatures = [], dis
     const answer = String(overlay.answer || "").toLowerCase();
     const isNo = ["no", "colder", "further", "outside", "exclude"].includes(answer);
     const contextOnly = endgameMode && constraint.movementMode !== "locked";
-    const color = contextOnly ? "#718096" : isNo ? "#b54708" : "#3269bb";
+    const color = contextOnly ? "#6d3db0" : isNo ? "#b54708" : "#3269bb";
     const opacity = contextOnly ? 0.42 : 0.88;
     const fillOpacity = contextOnly ? 0.012 : 0.035;
     const weight = contextOnly ? 1.5 : 2;
@@ -469,6 +486,7 @@ function buildAreaMaskPlans({
       selected: true,
       cellSizeMetres: 22,
       layerKind: "current",
+      paletteMode: "endgame",
       drawOutline: true
     });
     return plans;
@@ -493,7 +511,7 @@ function buildAreaMaskPlans({
       radiusMetres: 500,
       cellSizeMetres
     });
-    return { station, mask, radiusMetres: 500, selected, cellSizeMetres, layerKind: "current", drawOutline: true };
+    return { station, mask, radiusMetres: 500, selected, cellSizeMetres, layerKind: "current", paletteMode: "default", drawOutline: true };
   });
 }
 
@@ -543,7 +561,7 @@ function attachAreaMaskCanvas(map, plans) {
       context.stroke();
       return;
     }
-    const palette = maskCellPalette(cell);
+    const palette = maskCellPalette(cell, plan.paletteMode);
     traceCell(points);
     context.fillStyle = palette.fill;
     context.fill();
@@ -695,7 +713,7 @@ function vectorConstraintSvg(constraints, spatialFeatures = [], projection = VEC
     const historical = displayMode === DEDUCTION_MAP_MODES.ENDGAME && constraint.movementMode !== "locked";
     const answer = String(overlay.answer || "").toLowerCase();
     const negative = ["no", "colder", "further", "outside", "exclude"].includes(answer);
-    const colour = historical ? "#6688b8" : negative ? "#b54708" : "#3269bb";
+    const colour = historical ? "#6d3db0" : negative ? "#b54708" : "#3269bb";
     const opacity = historical ? ".38" : "1";
     const wrap = (body) => `<g opacity="${opacity}">${body}</g>`;
     if (overlay.type === "circle" && overlay.centre && Number.isFinite(overlay.radiusMetres)) {
@@ -727,7 +745,7 @@ function vectorConstraintSvg(constraints, spatialFeatures = [], projection = VEC
 
 function vectorAreaMaskSvg(plans, projection = VECTOR_MAP) {
   if (!plans.length) return { defs: "", body: "" };
-  const historyPattern = `<pattern id="history-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(0)"><rect width="8" height="8" fill="#3269bb" fill-opacity=".10" /><path d="M-2 8 L8 -2 M2 10 L10 2" stroke="#265191" stroke-opacity=".48" stroke-width="1.2" /></pattern>`;
+  const historyPattern = `<pattern id="history-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(0)"><rect width="8" height="8" fill="#6d3db0" fill-opacity=".12" /><path d="M-2 8 L8 -2 M2 10 L10 2" stroke="#572a94" stroke-opacity=".58" stroke-width="1.35" /></pattern>`;
   const clips = plans.map((plan, index) => {
     const centre = vectorPoint(plan.station, projection);
     const radius = vectorEllipse(plan.station, plan.radiusMetres, projection);
@@ -737,10 +755,15 @@ function vectorAreaMaskSvg(plans, projection = VECTOR_MAP) {
     const cells = plan.mask.cells.map((cell, cellIndex) => {
       if (plan.layerKind === "history") {
         if (cell.state !== "excluded" || plan.hardMask?.cells?.[cellIndex]?.state === "excluded") return "";
-        return `<polygon class="mask-cell-history" points="${vectorPoints(cell.corners, projection)}" fill="url(#history-hatch)" stroke="#265191" stroke-opacity=".34" stroke-width=".6" />`;
+        return `<polygon class="mask-cell-history" points="${vectorPoints(cell.corners, projection)}" fill="url(#history-hatch)" stroke="#572a94" stroke-opacity=".42" stroke-width=".65" />`;
       }
-      const fill = cell.state === "excluded" ? "#4e5865" : cell.state === "allowed" ? "#1e9d7e" : "#e4a11b";
-      const opacity = cell.state === "excluded" ? excludedCellOpacity(cell).toFixed(3) : ".30";
+      const endgamePalette = plan.paletteMode === "endgame";
+      const fill = endgamePalette
+        ? cell.state === "excluded" ? "#da183e" : cell.state === "allowed" ? "#00c476" : "#ffb800"
+        : cell.state === "excluded" ? "#4e5865" : cell.state === "allowed" ? "#1e9d7e" : "#e4a11b";
+      const opacity = endgamePalette
+        ? cell.state === "excluded" ? ".84" : cell.state === "allowed" ? ".68" : ".62"
+        : cell.state === "excluded" ? excludedCellOpacity(cell).toFixed(3) : ".30";
       return `<polygon class="mask-cell-${cell.state}" points="${vectorPoints(cell.corners, projection)}" fill="${fill}" fill-opacity="${opacity}" stroke="${fill}" stroke-opacity=".17" stroke-width=".7" />`;
     }).join("");
     const centre = vectorPoint(plan.station, projection);

@@ -14,7 +14,7 @@ The configured map ID points to a user-provided Google My Maps layer. The map, b
 
 - Transport for London names, status data and station information are provided by TfL and remain subject to TfL terms. Embedded station centres are planning coordinates and do not supersede the supplied authoritative map.
 - OpenStreetMap map data and tiles are credited in the map interface and remain subject to OpenStreetMap/OpenStreetMap Foundation terms and the Open Database Licence where applicable.
-- The built-in Thames planning centreline is a hand-curated game aid aligned to major crossings and the OpenStreetMap basemap. It is not a surveyed bank boundary and carries the same OpenStreetMap attribution in the source and interface.
+- The built-in Thames planning guide is a hand-curated game aid aligned to major crossings and the OpenStreetMap basemap. It is not a surveyed bank boundary and carries OpenStreetMap attribution in the source and interface.
 - Nominatim is used only as a fallback station geocoder and is subject to its usage policy.
 - National Rail and linked service-status pages are external services with their own terms.
 

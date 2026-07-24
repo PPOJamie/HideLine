@@ -49,6 +49,7 @@ export function renderShell(state, content) {
           </div>
           <div class="topbar-actions">
             ${state.ui.installPromptAvailable ? `<button class="button button-soft button-small" type="button" data-action="install-app">${icon("download")}<span class="desktop-only">Install</span></button>` : ""}
+            ${connection.mode === "connected" && !state.settings?.notificationsEnabled ? `<button class="icon-button" type="button" data-action="enable-notifications" aria-label="Enable device notifications" title="Enable device notifications">${icon("bell")}</button>` : ""}
             <button class="icon-button topbar-help" type="button" data-action="navigate" data-view="rules" aria-label="Open quick rules">${icon("bookOpen")}</button>
             <button class="profile-chip" type="button" data-action="open-modal" data-modal="profile" aria-label="Edit profile">
               <span class="avatar">${escapeHtml(initials(state.profile.name))}</span><span>${escapeHtml(state.profile.name)}</span>
@@ -61,6 +62,7 @@ export function renderShell(state, content) {
     </div>
     <dialog id="app-modal" class="modal"></dialog>
     <dialog id="coordinate-picker-modal" class="modal coordinate-picker-modal"></dialog>
+    <div id="game-alert-region" class="game-alert-region" aria-live="assertive" aria-relevant="additions text"></div>
     <div id="toast-region" class="toast-region" aria-live="assertive" aria-atomic="true"></div>
   `;
 }

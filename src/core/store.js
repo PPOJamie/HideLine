@@ -4,7 +4,7 @@ import { randomId, roomCode } from "./format.js";
 
 export function createDefaultState() {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     profile: {
       id: localStorage.getItem("hideline:device-id") || randomId("device"),
       name: "Player",
@@ -54,7 +54,8 @@ export function createDefaultState() {
       locationPrecision: "precise",
       theme: "system",
       safetyContact: "",
-      mapTileProvider: "osm"
+      mapTileProvider: "osm",
+      notificationsEnabled: false
     }
   };
 }
@@ -135,6 +136,11 @@ export class Store extends EventTarget {
           roundState.showAreaMask = true;
           roundState.showZones = true;
         }
+      }
+      if (previousSchema < 5) {
+        this.state.schemaVersion = 5;
+        this.state.settings ||= {};
+        if (typeof this.state.settings.notificationsEnabled !== "boolean") this.state.settings.notificationsEnabled = false;
       }
     } catch {
       this.state = defaults;

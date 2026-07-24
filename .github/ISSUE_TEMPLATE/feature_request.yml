@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest a gameplay, accessibility or deployment improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the game-day need rather than only the proposed interface.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: rules
+    attributes:
+      label: Handbook/rules impact
+      description: Note any relevant handbook page or adjudication concern.
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy or security impact

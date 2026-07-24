@@ -1,4 +1,4 @@
-import { DEFAULT_DURATIONS, PHASES, TEAM_LABELS } from "../core/constants.js";
+import { APP_VERSION, DEFAULT_DURATIONS, PHASES, TEAM_LABELS } from "../core/constants.js";
 import { escapeHtml, formatDateTime } from "../core/format.js";
 import { QUESTION_BY_ID, repeatedReward } from "../data/questions.js";
 import { CARD_TYPES } from "../data/rules.js";
@@ -80,10 +80,32 @@ function joinGameModal(state) {
   `);
 }
 
+function notificationSettingsBlock(state) {
+  const supported = typeof globalThis.Notification !== "undefined";
+  const permission = supported ? globalThis.Notification.permission : "unsupported";
+  const enabled = Boolean(state.settings?.notificationsEnabled && permission === "granted");
+  const status = !supported
+    ? "Not supported by this browser"
+    : permission === "denied"
+      ? "Blocked in browser or phone settings"
+      : enabled
+        ? "Enabled for this device"
+        : permission === "granted"
+          ? "Permission granted, currently paused in HideLine"
+          : "Not enabled yet";
+  const action = enabled
+    ? `<button class="button button-soft button-small" type="button" data-action="disable-notifications">Disable device alerts</button>`
+    : permission === "denied" || !supported
+      ? ""
+      : `<button class="button button-primary button-small" type="button" data-action="enable-notifications">${icon("bell")} Enable device alerts</button>`;
+  return `<section class="notification-settings-card"><span class="notification-settings-icon">${icon("bell")}</span><div><strong>Game notifications</strong><p>In-app pop-ups always appear for important live updates. Device alerts can also appear when HideLine is open in the background.</p><small>HideLine ${escapeHtml(APP_VERSION)} · ${escapeHtml(status)}</small></div><div class="notification-settings-actions"><button class="button button-soft button-small" type="button" data-action="test-notification">Test pop-up</button>${action}</div></section>`;
+}
+
 function settingsModal(state) {
   return frame("App settings", "Configure live sync, repeat-question rewards and privacy defaults.", `
     <form class="stack" data-form="settings">
       <div class="field"><label for="repeat-mode">Repeated-question rewards</label><select id="repeat-mode" name="repeatRewardMode"><option value="multiply-both" ${state.settings.repeatRewardMode === "multiply-both" ? "selected" : ""}>Multiply draw and keep</option><option value="draw-only" ${state.settings.repeatRewardMode === "draw-only" ? "selected" : ""}>Multiply draw only</option><option value="manual" ${state.settings.repeatRewardMode === "manual" ? "selected" : ""}>Resolve manually</option></select></div>
+      ${notificationSettingsBlock(state)}
       <div class="field"><label for="safety-contact">Emergency / organiser contact</label><input id="safety-contact" name="safetyContact" value="${escapeHtml(state.settings.safetyContact || "")}" placeholder="Name or phone number" /></div>
       <details class="manual-coordinate-details"><summary>Connected Mode setup</summary><div class="stack">${connectionFields(state)}<label class="checkbox-row"><input type="checkbox" name="rememberConnection" checked /><span>Remember these settings in this browser.</span></label></div></details>
       <button class="button button-primary" type="submit">${icon("check")} Save settings</button>
@@ -184,6 +206,8 @@ function addTrapModal() {
 function deductionCoordinateFields(prefix, label, current = null) {
   const lat = current?.lat != null ? Number(current.lat).toFixed(6) : "";
   const lng = current?.lng != null ? Number(current.lng).toFixed(6) : "";
+  const selected = Boolean(lat && lng);
+  const mapUrl = selected ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}` : "";
   return `
     <fieldset class="coordinate-pair compact-coordinate-pair simple-coordinate-pair">
       <legend>${escapeHtml(label)}</legend>
@@ -191,7 +215,11 @@ function deductionCoordinateFields(prefix, label, current = null) {
         <button class="button button-soft button-small" type="button" data-action="deduction-fill-gps" data-prefix="${prefix}">${icon("location")} Use current GPS</button>
         <button class="button button-primary button-small" type="button" data-action="coordinate-picker-open" data-prefix="${prefix}" data-label="${escapeHtml(label)}">${icon("map")} Pick coordinates from map</button>
       </div>
-      <details class="manual-coordinate-details" ${lat && lng ? "open" : ""}><summary>Enter coordinates manually</summary><div class="field-row"><div class="field"><label for="${prefix}-lat">Latitude</label><input id="${prefix}-lat" name="${prefix}Lat" type="number" inputmode="decimal" step="any" min="-90" max="90" value="${lat}" /></div><div class="field"><label for="${prefix}-lng">Longitude</label><input id="${prefix}-lng" name="${prefix}Lng" type="number" inputmode="decimal" step="any" min="-180" max="180" value="${lng}" /></div></div></details>
+      <div class="coordinate-selection-summary ${selected ? "selected" : ""}" data-coordinate-summary="${prefix}">
+        ${icon("location")}<span>${selected ? `${lat}, ${lng}` : "No point selected yet"}</span>
+        <a class="coordinate-preview-link" data-coordinate-preview="${prefix}" href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener noreferrer" ${selected ? "" : "hidden"}>Open in Google Maps ${icon("external")}</a>
+      </div>
+      <details class="manual-coordinate-details" ${selected ? "open" : ""}><summary>Enter coordinates manually</summary><div class="field-row"><div class="field"><label for="${prefix}-lat">Latitude</label><input id="${prefix}-lat" name="${prefix}Lat" type="number" inputmode="decimal" step="any" min="-90" max="90" value="${lat}" /></div><div class="field"><label for="${prefix}-lng">Longitude</label><input id="${prefix}-lng" name="${prefix}Lng" type="number" inputmode="decimal" step="any" min="-180" max="180" value="${lng}" /></div></div></details>
     </fieldset>`;
 }
 
@@ -243,6 +271,19 @@ function questionDeductionFields(state, question) {
   return `${hidden}<details class="deduction-question-fields simple-question-map-details" open><summary><span>${icon("map")} Information needed for the map</span><span class="badge badge-mint">Automatic</span></summary><div class="stack deduction-question-body">${fields}${dataNote}</div></details>`;
 }
 
+function questionPinFields(state, question) {
+  if (!question?.requiresPin) return "";
+  const config = questionDeductionConfig(question);
+  const hasMapCoordinateControls = question.category === "radar"
+    || question.category === "thermometer"
+    || question.id === "matching-landmass"
+    || Boolean(config.requiresSeekerPoint);
+  const picker = hasMapCoordinateControls
+    ? `<div class="callout question-pin-help">${icon("location")}<p><strong>Share the map point.</strong> Use the <em>Pick coordinates from map</em> button below. HideLine will also add a clickable Google Maps link to the question.</p></div>`
+    : deductionCoordinateFields("deductionShared", "Question pin shared with the hiders", state.location?.current || null);
+  return `${picker}<details class="manual-coordinate-details"><summary>Paste a Google Maps link or add a location name</summary><div class="field"><label for="question-pin">Shared pin or location label</label><input id="question-pin" name="pinLabel" maxlength="300" placeholder="https://maps.google.com/… or Waterloo station" /><span class="field-hint">This is saved with the question and shown to the hider team.</span></div></details>`;
+}
+
 function askQuestionModal(state, questionId) {
   const question = QUESTION_BY_ID.get(questionId);
   if (!question) return frame("Question not found", "", `<p>The selected question is no longer available.</p>`);
@@ -253,7 +294,7 @@ function askQuestionModal(state, questionId) {
     <form class="stack simple-ask-form" data-form="ask-question" data-question-id="${question.id}">
       <div class="simple-modal-prompt"><strong>${escapeHtml(question.prompt)}</strong><p>${escapeHtml(question.guidance)}</p></div>
       <div class="row wrap simple-question-facts"><span class="badge badge-blue">${question.responseSeconds / 60} min to answer</span><span class="badge badge-purple">Draw ${reward.draw}, keep ${reward.keep}</span>${occurrence > 1 ? `<span class="badge badge-yellow">Repeat x${occurrence}</span>` : ""}</div>
-      ${question.requiresPin ? `<div class="field"><label for="question-pin">Shared pin or location label</label><input id="question-pin" name="pinLabel" maxlength="120" placeholder="Paste the Google Maps pin or name the location" /><span class="field-hint">Share the actual pin with the hiders before asking.</span></div>` : ""}
+      ${questionPinFields(state, question)}
       ${question.customInput ? `<div class="field"><label for="custom-value">Custom distance or value</label><input id="custom-value" name="customValue" maxlength="80" required placeholder="e.g. 7.4 km" /></div>` : ""}
       ${questionDeductionFields(state, question)}
       <details class="manual-coordinate-details"><summary>Add an optional clarification</summary><div class="field"><label for="question-note">Note</label><textarea id="question-note" name="note" maxlength="400" placeholder="Line branch, endpoints, floor, POI interpretation…"></textarea></div></details>

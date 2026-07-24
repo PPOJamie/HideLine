@@ -1,9 +1,11 @@
 import { APP_VERSION, DEFAULT_DURATIONS, PHASES, STORAGE_KEY, TEAM_LABELS, TEAMS, VIEWS } from "./core/constants.js";
 import { Store, createGameState } from "./core/store.js";
+import { notificationForGameEvent, notificationForPendingQuestion } from "./core/notifications.js";
 import { adjustmentTarget, calculateScore } from "./core/score.js";
 import { activeElapsedSeconds, formatDuration, parseDurationParts, questionSecondsRemaining, toIso } from "./core/time.js";
 import { downloadJson, escapeHtml, number, randomId, roomCode } from "./core/format.js";
 import { haversineMetres } from "./core/geo.js";
+import { questionLocationSummary, serialiseQuestionLocations } from "./core/question-location.js";
 import {
   DEDUCTION_AREA_SELECTION_ALL,
   DEDUCTION_MAP_MODES,
@@ -48,6 +50,7 @@ import { renderQuestionsView } from "./ui/questions-view.js";
 import { renderToolsView } from "./ui/tools-view.js";
 import { renderRulesView } from "./ui/rules-view.js";
 import { renderModal } from "./ui/modals.js";
+import { icon } from "./ui/icons.js";
 
 class HideLineApp {
   constructor(root) {
@@ -67,6 +70,10 @@ class HideLineApp {
     this.transitionLock = false;
     this.autoConnectAttempted = false;
     this.evidenceObjectUrl = null;
+    this.activeNotifications = [];
+    this.seenRemoteEventIds = new Set();
+    this.alertedQuestionIds = new Set();
+    this.notificationSweepTimer = null;
   }
 
   async init() {
@@ -82,8 +89,10 @@ class HideLineApp {
     this.location.addEventListener("error", (event) => this.handleLocationError(event.detail));
     this.render();
     this.startClock();
+    this.startNotificationSweep();
     this.registerServiceWorker();
     await this.autoConnect();
+    this.syncPendingQuestionNotifications();
     const joinCode = new URLSearchParams(location.search).get("join");
     if (joinCode && !this.store.get().game) this.openModal("join-game");
   }
@@ -118,11 +127,18 @@ class HideLineApp {
       if (this.store.get().connection.mode === "connected") this.store.patch("connection.status", "online", { source: "connection", persist: false });
     });
     window.addEventListener("offline", () => this.store.patch("connection.status", "offline", { source: "connection", persist: false }));
+    window.addEventListener("focus", () => this.syncPendingQuestionNotifications());
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") this.syncPendingQuestionNotifications();
+    });
   }
 
   handleStoreChange(event) {
     const source = event?.detail?.source || "local";
     const state = this.store.get();
+    if (!["location", "remote-position", "presence"].includes(source)) {
+      queueMicrotask(() => this.syncPendingQuestionNotifications());
+    }
     const noFullRender = new Set(["connection", "location", "remote-position", "presence"]);
     if (noFullRender.has(source)) {
       this.updateConnectionChrome();
@@ -191,14 +207,16 @@ class HideLineApp {
       return;
     }
     const current = this.store.get();
+    const previousQuestions = current.questions || [];
+    const previousPendingIds = new Set(previousQuestions.filter((question) => question.status === "pending").map((question) => question.id));
     const remote = row.state || {};
     const previousMapSignature = JSON.stringify({
       round: current.game?.round,
       phase: current.game?.phase,
       hiderTeam: current.game?.hiderTeam,
-      questions: current.questions || []
+      questions: previousQuestions
     });
-    const nextQuestions = remote.questions || current.questions || [];
+    const nextQuestions = remote.questions || previousQuestions;
     const nextMapSignature = JSON.stringify({
       round: remote.round ?? current.game?.round,
       phase: remote.phase ?? current.game?.phase,
@@ -232,6 +250,13 @@ class HideLineApp {
       draft.connection.error = null;
       return draft;
     }, { source });
+
+    const nextPendingIds = new Set(nextQuestions.filter((question) => question.status === "pending").map((question) => question.id));
+    previousPendingIds.forEach((id) => {
+      if (!nextPendingIds.has(id)) this.dismissQuestionNotification(id);
+    });
+    const newlyPending = nextQuestions.find((question) => question.status === "pending" && !previousPendingIds.has(question.id));
+    if (newlyPending && newlyPending.askedBy !== this.store.get().profile.id) this.alertPendingQuestion(newlyPending);
   }
 
   applyRemoteTeamState(payload = {}) {
@@ -316,15 +341,19 @@ class HideLineApp {
     const eventType = String(payload.eventType || payload.event || "").toUpperCase();
     const row = eventType === "DELETE" ? payload.old : payload.new;
     if (!row?.id) return;
+    const alreadySeen = this.seenRemoteEventIds.has(row.id);
+    if (eventType !== "DELETE") this.seenRemoteEventIds.add(row.id);
+    let receivedEvent = null;
     this.store.set((draft) => {
       const remaining = (draft.events || []).filter((event) => event.id !== row.id);
       if (eventType === "DELETE") draft.events = remaining;
       else {
-        const event = { id: row.id, type: row.event_type, payload: row.payload || {}, team: row.team, visibility: row.visibility, createdAt: row.created_at, createdBy: row.created_by };
-        draft.events = [event, ...remaining].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))).slice(0, 300);
+        receivedEvent = { id: row.id, type: row.event_type, payload: row.payload || {}, team: row.team, visibility: row.visibility, createdAt: row.created_at, createdBy: row.created_by };
+        draft.events = [receivedEvent, ...remaining].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))).slice(0, 300);
       }
       return draft;
     }, { source: "remote-event" });
+    if (eventType === "INSERT" && receivedEvent && !alreadySeen) this.notifyForRemoteEvent(receivedEvent);
   }
 
   render({ preserveFocus = true } = {}) {
@@ -343,6 +372,7 @@ class HideLineApp {
     this.restoreModal();
     this.restoreCoordinatePicker();
     this.restoreFocus(focus);
+    this.renderNotifications();
     this.afterRender();
   }
 
@@ -462,6 +492,159 @@ class HideLineApp {
     setTimeout(() => element.remove(), 5200);
   }
 
+  notificationRegion() {
+    let region = document.getElementById("game-alert-region");
+    if (region) return region;
+    region = document.createElement("div");
+    region.id = "game-alert-region";
+    region.className = "game-alert-region";
+    region.setAttribute("aria-live", "assertive");
+    region.setAttribute("aria-relevant", "additions text");
+    document.body.append(region);
+    return region;
+  }
+
+  renderNotifications() {
+    const region = this.notificationRegion();
+    region.innerHTML = this.activeNotifications.map((notice) => `
+      <article class="game-alert ${escapeHtml(notice.tone || "info")} ${notice.urgent ? "urgent" : ""}" role="alert" data-notification-id="${escapeHtml(notice.id)}">
+        <span class="game-alert-icon">${icon(notice.iconName || "bell")}</span>
+        <div class="game-alert-copy"><span>Live game update</span><strong>${escapeHtml(notice.title)}</strong><p>${escapeHtml(notice.body)}</p></div>
+        <div class="game-alert-actions">
+          ${notice.actionLabel ? `<button class="button button-primary button-small" type="button" data-action="notification-navigate" data-view="${escapeHtml(notice.view || VIEWS.PLAY)}" data-id="${escapeHtml(notice.id)}">${escapeHtml(notice.actionLabel)}</button>` : ""}
+          <button class="icon-button" type="button" data-action="notification-dismiss" data-id="${escapeHtml(notice.id)}" aria-label="Dismiss notification">×</button>
+        </div>
+      </article>`).join("");
+  }
+
+  dismissGameNotification(id) {
+    const notice = this.activeNotifications.find((item) => item.id === id);
+    if (notice?.timer) clearTimeout(notice.timer);
+    this.activeNotifications = this.activeNotifications.filter((item) => item.id !== id);
+    this.renderNotifications();
+  }
+
+  dismissQuestionNotification(questionInstanceId) {
+    if (!questionInstanceId) return;
+    this.dismissGameNotification(`question:${questionInstanceId}`);
+  }
+
+  showGameNotification({ title, body, tone = "info", iconName = "bell", actionLabel = "Open", view = VIEWS.PLAY, tag = "", urgent = false, persistent = false, questionInstanceId = null } = {}) {
+    const id = tag || randomId("notice");
+    const previous = this.activeNotifications.find((item) => item.id === id);
+    if (previous?.timer) clearTimeout(previous.timer);
+    this.activeNotifications = this.activeNotifications.filter((item) => item.id !== id);
+    const notice = {
+      id,
+      title: String(title || "Game update"),
+      body: String(body || "Something changed in the game."),
+      tone,
+      iconName,
+      actionLabel,
+      view,
+      urgent: Boolean(urgent),
+      persistent: Boolean(persistent),
+      questionInstanceId
+    };
+    if (!notice.persistent) notice.timer = setTimeout(() => this.dismissGameNotification(id), urgent ? 18_000 : 11_000);
+    const next = [notice, ...this.activeNotifications];
+    for (const dropped of next.slice(3)) if (dropped.timer) clearTimeout(dropped.timer);
+    this.activeNotifications = next.slice(0, 3);
+    this.renderNotifications();
+    if (urgent && navigator.vibrate) navigator.vibrate([160, 70, 160]);
+    this.showDeviceNotification(notice).catch((error) => console.warn("Device notification could not be shown", error));
+  }
+
+  alertPendingQuestion(record) {
+    if (!record?.id) return;
+    const notice = notificationForPendingQuestion(record, this.store.get());
+    if (!notice) return;
+    if (this.activeNotifications.some((item) => item.id === notice.tag)) return;
+    if (this.alertedQuestionIds.has(record.id)) return;
+    this.alertedQuestionIds.add(record.id);
+    this.showGameNotification(notice);
+  }
+
+  syncPendingQuestionNotifications() {
+    const state = this.store.get();
+    const pendingQuestions = (state.questions || []).filter((question) => question.status === "pending");
+    const pendingIds = new Set(pendingQuestions.map((question) => question.id));
+    [...this.alertedQuestionIds].forEach((id) => {
+      if (!pendingIds.has(id)) {
+        this.alertedQuestionIds.delete(id);
+        this.dismissQuestionNotification(id);
+      }
+    });
+    if (state.connection.mode !== "connected") return;
+    pendingQuestions
+      .filter((question) => question.askedBy !== state.profile.id)
+      .forEach((question) => this.alertPendingQuestion(question));
+  }
+
+  testGameNotification() {
+    this.showGameNotification({
+      title: "Notifications are working",
+      body: "This is a HideLine test alert. Live questions will appear here on the hider devices.",
+      tone: "success",
+      iconName: "bell",
+      actionLabel: "Open questions",
+      view: VIEWS.QUESTIONS,
+      tag: `notification-test:${Date.now()}`,
+      urgent: true
+    });
+  }
+
+  async showDeviceNotification(notice) {
+    const state = this.store.get();
+    if (!state.settings.notificationsEnabled || typeof Notification === "undefined" || Notification.permission !== "granted" || !document.hidden) return;
+    const options = {
+      body: notice.body,
+      icon: new URL("./assets/icon-192.png", location.href).href,
+      badge: new URL("./assets/icon-192.png", location.href).href,
+      tag: notice.id,
+      renotify: true,
+      data: { url: new URL(`./?view=${encodeURIComponent(notice.view || VIEWS.PLAY)}`, location.href).href },
+      vibrate: notice.tone === "question" ? [180, 80, 180] : [120]
+    };
+    if ("serviceWorker" in navigator) {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification(notice.title, options);
+    } else new Notification(notice.title, options);
+  }
+
+  notifyForRemoteEvent(event) {
+    if (!event || event.createdBy === this.sync.session?.user?.id) return;
+    if (event.type === "answer") this.dismissQuestionNotification(event.payload?.questionInstanceId);
+    const notice = notificationForGameEvent(event, this.store.get());
+    if (!notice) return;
+    if (event.type === "question") {
+      const questionId = event.payload?.questionInstanceId;
+      if (questionId && this.alertedQuestionIds.has(questionId)) return;
+      if (questionId) this.alertedQuestionIds.add(questionId);
+    }
+    this.showGameNotification(notice);
+  }
+
+  async enableDeviceNotifications() {
+    if (typeof Notification === "undefined") throw new Error("This browser does not support device notifications. In-app pop-ups will still work.");
+    const permission = await Notification.requestPermission();
+    const enabled = permission === "granted";
+    this.store.patch("settings.notificationsEnabled", enabled);
+    if (enabled) this.toast("Device alerts enabled. In-app pop-ups are always on.", "success");
+    else if (permission === "denied") this.toast("Notifications are blocked in this browser's site settings.", "warning");
+    else this.toast("Device alerts were not enabled. In-app pop-ups will still appear.", "warning");
+  }
+
+  disableDeviceNotifications() {
+    this.store.patch("settings.notificationsEnabled", false);
+    this.toast("Device alerts disabled. In-app pop-ups remain active.", "success");
+  }
+
+  startNotificationSweep() {
+    clearInterval(this.notificationSweepTimer);
+    this.notificationSweepTimer = setInterval(() => this.syncPendingQuestionNotifications(), 5_000);
+  }
+
   questionPermissions() {
     const state = this.store.get();
     const game = state.game;
@@ -502,6 +685,11 @@ class HideLineApp {
         case "open-game-kit": this.openGameKit(); break;
         case "close-modal": this.closeModal(); break;
         case "dismiss-toast": button.closest(".toast")?.remove(); break;
+        case "notification-dismiss": this.dismissGameNotification(button.dataset.id); break;
+        case "notification-navigate": this.dismissGameNotification(button.dataset.id); this.store.patch("ui.view", button.dataset.view || VIEWS.PLAY); this.updateUrlView(button.dataset.view || VIEWS.PLAY); break;
+        case "enable-notifications": await this.enableDeviceNotifications(); break;
+        case "disable-notifications": this.disableDeviceNotifications(); break;
+        case "test-notification": this.testGameNotification(); break;
         case "install-app": await this.installApp(); break;
         case "map-mode": cancelDeductionMapPick(); this.store.patch("ui.mapMode", button.dataset.mode); break;
         case "deduction-map-display": await this.setDeductionMapDisplay(button.dataset.mode); break;
@@ -566,6 +754,8 @@ class HideLineApp {
 
   handleInput(event) {
     const action = event.target.dataset.action;
+    const coordinateMatch = String(event.target.name || "").match(/^(.*)(Lat|Lng)$/);
+    if (coordinateMatch) this.updateCoordinateSummary(event.target.closest("form"), coordinateMatch[1]);
     if (action === "question-search") this.debouncedPatch("ui.questionSearch", event.target.value);
     if (action === "station-filter") this.debouncedPatch("ui.stationSearch", event.target.value);
     if (action === "deduction-search") this.debouncedPatch("ui.deductionSearch", event.target.value);
@@ -784,6 +974,7 @@ class HideLineApp {
       }))
     };
     const events = (hydrated.events || []).map((event) => ({ id: event.id, type: event.event_type, payload: event.payload || {}, team: event.team, visibility: event.visibility, createdAt: event.created_at, createdBy: event.created_by }));
+    events.forEach((event) => this.seenRemoteEventIds.add(event.id));
     const teamState = hydrated.teamState?.state || {};
     this.store.set((draft) => {
       draft.game = game;
@@ -814,6 +1005,7 @@ class HideLineApp {
       }
       return draft;
     }, { source: "remote" });
+    queueMicrotask(() => this.syncPendingQuestionNotifications());
   }
 
   scheduleRemoteRefresh(table = "unknown") {
@@ -865,6 +1057,7 @@ class HideLineApp {
     } else {
       event = { id: randomId("event"), type, payload: eventPayload, team: this.store.get().profile.team, visibility, createdAt: toIso(), createdBy: this.store.get().profile.id };
     }
+    this.seenRemoteEventIds.add(event.id);
     this.store.set((draft) => { draft.events = [event, ...draft.events.filter((item) => item.id !== event.id)].slice(0, 300); return draft; });
     return event;
   }
@@ -1113,15 +1306,22 @@ class HideLineApp {
       deductionInput,
       note: String(data.note || "").trim(),
       pinLabel: String(data.pinLabel || "").trim(),
+      locations: [],
+      locationDataVersion: 1,
       status: "pending",
       answer: null,
       answeredAt: null,
       rewardEarned: null
     };
+    // Store a canonical, serialisable location list on the question itself. This
+    // keeps pins visible on every device even when a client does not understand
+    // the newest deduction-input structure.
+    record.locations = serialiseQuestionLocations(record);
+    record.locationSummary = questionLocationSummary(record);
     const questions = [...state.questions, record];
     this.store.patch("questions", questions);
     await this.patchGameRemote({ questions });
-    await this.recordEvent("question", { questionId, questionName: definition.name, prompt, note: record.note, occurrence, reward, questionInstanceId: record.id, pinLabel: record.pinLabel, round });
+    await this.recordEvent("question", { questionId, questionName: definition.name, prompt, note: record.note, occurrence, reward, questionInstanceId: record.id, pinLabel: record.pinLabel, locations: record.locations, locationSummary: record.locationSummary, round });
     this.closeModal();
     this.toast(`Question asked. Hiders have ${definition.responseSeconds / 60} minutes.`, "success");
   }
@@ -1147,6 +1347,7 @@ class HideLineApp {
     this.store.patch("questions", questions);
     await this.patchGameRemote({ questions });
     await this.recordEvent("answer", { questionInstanceId: instanceId, questionName: record.questionName, answer: record.answer, note: record.answerNote, rewardEarned: record.rewardEarned, evidencePath: record.evidencePath || null, round: record.round });
+    this.dismissQuestionNotification(instanceId);
     this.closeModal();
     if (record.rewardEarned) this.toast(`Answer recorded. Draw ${record.reward.draw}, keep ${record.reward.keep}.`, "success");
     else this.toast("Answer recorded after the deadline: pause required and no reward earned.", "warning");
@@ -1504,12 +1705,23 @@ class HideLineApp {
   }
 
   deductionPoint(data, prefix, label) {
-    const lat = Number(data[`${prefix}Lat`]);
-    const lng = Number(data[`${prefix}Lng`]);
+    const latRaw = String(data?.[`${prefix}Lat`] ?? "").trim();
+    const lngRaw = String(data?.[`${prefix}Lng`] ?? "").trim();
+    if (!latRaw || !lngRaw) throw new Error(`Pick coordinates for ${label} before asking the question.`);
+    const lat = Number(latRaw);
+    const lng = Number(lngRaw);
     if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
       throw new Error(`Enter valid latitude and longitude for ${label}.`);
     }
     return { lat, lng };
+  }
+
+  optionalDeductionPoint(data, prefix, label = "the shared question pin") {
+    const latRaw = String(data?.[`${prefix}Lat`] ?? "").trim();
+    const lngRaw = String(data?.[`${prefix}Lng`] ?? "").trim();
+    if (!latRaw && !lngRaw) return null;
+    if (!latRaw || !lngRaw) throw new Error(`Choose both latitude and longitude for ${label}.`);
+    return this.deductionPoint(data, prefix, label);
   }
 
   async addDeductionConstraint(form, data) {
@@ -1649,8 +1861,25 @@ class HideLineApp {
     if (!lat || !lng) throw new Error("The coordinate fields could not be found.");
     lat.value = Number(point.lat).toFixed(6);
     lng.value = Number(point.lng).toFixed(6);
+    this.updateCoordinateSummary(form, prefix);
     lat.dispatchEvent(new Event("input", { bubbles: true }));
     lng.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  updateCoordinateSummary(form, prefix) {
+    if (!form || !prefix) return;
+    const summary = form.querySelector(`[data-coordinate-summary="${CSS.escape(prefix)}"]`);
+    if (!summary) return;
+    const point = this.coordinatePointFromForm(form, prefix);
+    const text = summary.querySelector("span");
+    const preview = summary.querySelector(`[data-coordinate-preview="${CSS.escape(prefix)}"]`);
+    if (text) text.textContent = point ? `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}` : "No point selected yet";
+    if (preview) {
+      preview.hidden = !point;
+      if (point) preview.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${point.lat.toFixed(6)},${point.lng.toFixed(6)}`)}`;
+      else preview.removeAttribute("href");
+    }
+    summary.classList.toggle("selected", Boolean(point));
   }
 
   async fillDeductionCoordinates(prefix, button) {
@@ -1855,7 +2084,7 @@ class HideLineApp {
   }
 
   questionDeductionInput(question, data, form, state) {
-    if (!question || data.deductionEnabled !== "on") return null;
+    if (!question) return null;
     const config = questionDeductionConfig(question);
     const movementMode = data.deductionMovementMode === DEDUCTION_MOVEMENT.LOCKED || state.game?.phase === PHASES.ENDGAME
       ? DEDUCTION_MOVEMENT.LOCKED
@@ -1866,6 +2095,7 @@ class HideLineApp {
         enabled: true,
         type: DEDUCTION_TOOL_TYPES.MANUAL_REVIEW,
         movementMode,
+        sharedPin: question.requiresPin ? this.optionalDeductionPoint(data, "deductionShared") : null,
         reviewReason: config.reason || "This answer needs seeker judgement before it can become an area mask."
       };
     }
@@ -1905,7 +2135,8 @@ class HideLineApp {
         type: DEDUCTION_TOOL_TYPES.STATION_NAME,
         movementMode: DEDUCTION_MOVEMENT.MOBILE,
         seekerStationId: station.id,
-        seekerLength: stationNameLength(station.name)
+        seekerLength: stationNameLength(station.name),
+        sharedPin: this.optionalDeductionPoint(data, "deductionShared")
       };
     }
     if (question.id === "matching-rail-line") {
@@ -1917,7 +2148,8 @@ class HideLineApp {
         type: DEDUCTION_TOOL_TYPES.TRANSIT,
         movementMode: DEDUCTION_MOVEMENT.MOBILE,
         lineId: lineId || null,
-        stationIds
+        stationIds,
+        sharedPin: this.optionalDeductionPoint(data, "deductionShared")
       };
     }
     if (question.id === "matching-landmass") {
@@ -2226,6 +2458,9 @@ class HideLineApp {
     }
   }
 }
+
+window.__HIDELINE_LOADED_VERSION__ = APP_VERSION;
+document.getElementById("deployment-version-warning")?.remove();
 
 const root = document.getElementById("app");
 const app = new HideLineApp(root);
