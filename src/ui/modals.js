@@ -4,7 +4,7 @@ import { QUESTION_BY_ID, repeatedReward } from "../data/questions.js";
 import { CARD_TYPES } from "../data/rules.js";
 import { STATIONS, STATION_BY_ID } from "../data/stations.js";
 import { RAIL_LINES } from "../data/station-geo.js";
-import { questionDeductionConfig, questionDeductionKind } from "../data/question-deduction.js";
+import { questionDeductionConfig } from "../data/question-deduction.js";
 import { spatialCategoryLabel } from "../core/spatial.js";
 import { icon } from "./icons.js";
 
@@ -61,9 +61,8 @@ function newGameModal(state) {
   return frame("Create a game", "Start instantly on one device or create a live room for team-mates and opponents.", `
     <form class="stack" data-form="new-game">
       <div class="field"><label for="game-name">Game name</label><input id="game-name" name="gameName" maxlength="60" required value="London Hide + Seek" /></div>
-      <div class="field"><span class="field-label">Mode</span><label class="checkbox-row"><input type="radio" name="mode" value="local" checked /><span><strong>Local Mode</strong><br><span class="field-hint">Works immediately and offline; state stays on this device.</span></span></label><label class="checkbox-row"><input type="radio" name="mode" value="connected" /><span><strong>Connected Mode</strong><br><span class="field-hint">Creates a room code with Supabase real-time sync.</span></span></label></div>
-      <div class="callout">${icon("link")}<p><strong>Connected Mode setup</strong>If the URL/key below are blank, use Settings after deploying the included Supabase migration.</p></div>
-      ${connectionFields(state)}
+      <div class="field"><span class="field-label">Mode</span><label class="checkbox-row"><input type="radio" name="mode" value="local" checked /><span><strong>Local Mode</strong><br><span class="field-hint">Best for trying the app or sharing one device.</span></span></label><label class="checkbox-row"><input type="radio" name="mode" value="connected" /><span><strong>Connected Mode</strong><br><span class="field-hint">Links the teams with a room code. Open setup below only when this deployment has not been configured.</span></span></label></div>
+      <details class="manual-coordinate-details"><summary>Connected Mode setup</summary><div class="stack"><div class="callout">${icon("link")}<p>These details normally come from the person who deployed HideLine.</p></div>${connectionFields(state)}</div></details>
       <button class="button button-primary" type="submit">${icon("play")} Create game</button>
     </form>
   `);
@@ -75,7 +74,7 @@ function joinGameModal(state) {
     <form class="stack" data-form="join-game">
       <div class="field"><label for="join-code">Room code</label><input id="join-code" name="code" class="mono" maxlength="8" required value="${escapeHtml(queryCode.toUpperCase())}" placeholder="AB12CD" autocapitalize="characters" /></div>
       <div class="field"><label for="join-team">Join team</label><select id="join-team" name="team"><option value="alpha" ${state.profile.team === "alpha" ? "selected" : ""}>Team Alpha</option><option value="bravo" ${state.profile.team === "bravo" ? "selected" : ""}>Team Bravo</option></select></div>
-      ${connectionFields(state)}
+      <details class="manual-coordinate-details" ${!state.connection.supabaseUrl || !state.connection.supabaseAnonKey ? "open" : ""}><summary>Connection settings</summary><div class="stack">${connectionFields(state)}</div></details>
       <button class="button button-primary" type="submit">${icon("link")} Join room</button>
     </form>
   `);
@@ -84,11 +83,9 @@ function joinGameModal(state) {
 function settingsModal(state) {
   return frame("App settings", "Configure live sync, repeat-question rewards and privacy defaults.", `
     <form class="stack" data-form="settings">
-      ${connectionFields(state)}
-      <div class="divider"></div>
-      <div class="field"><label for="repeat-mode">Repeated-question reward display</label><select id="repeat-mode" name="repeatRewardMode"><option value="multiply-both" ${state.settings.repeatRewardMode === "multiply-both" ? "selected" : ""}>Multiply draw and keep</option><option value="draw-only" ${state.settings.repeatRewardMode === "draw-only" ? "selected" : ""}>Multiply draw only</option><option value="manual" ${state.settings.repeatRewardMode === "manual" ? "selected" : ""}>Show multiplier; resolve manually</option></select><span class="field-hint">The handbook says repeated questions pay x2, x3, and so on. Choose how your physical deck interprets that cost.</span></div>
+      <div class="field"><label for="repeat-mode">Repeated-question rewards</label><select id="repeat-mode" name="repeatRewardMode"><option value="multiply-both" ${state.settings.repeatRewardMode === "multiply-both" ? "selected" : ""}>Multiply draw and keep</option><option value="draw-only" ${state.settings.repeatRewardMode === "draw-only" ? "selected" : ""}>Multiply draw only</option><option value="manual" ${state.settings.repeatRewardMode === "manual" ? "selected" : ""}>Resolve manually</option></select></div>
       <div class="field"><label for="safety-contact">Emergency / organiser contact</label><input id="safety-contact" name="safetyContact" value="${escapeHtml(state.settings.safetyContact || "")}" placeholder="Name or phone number" /></div>
-      <label class="checkbox-row"><input type="checkbox" name="rememberConnection" checked /><span>Store the Supabase URL and anon key in this browser.</span></label>
+      <details class="manual-coordinate-details"><summary>Connected Mode setup</summary><div class="stack">${connectionFields(state)}<label class="checkbox-row"><input type="checkbox" name="rememberConnection" checked /><span>Remember these settings in this browser.</span></label></div></details>
       <button class="button button-primary" type="submit">${icon("check")} Save settings</button>
       <button class="button button-soft" type="button" data-action="export-game">${icon("download")} Export current game JSON</button>
       <button class="button button-danger" type="button" data-action="reset-app">${icon("trash")} Reset local app data</button>
@@ -105,8 +102,8 @@ function startRoundModal(state) {
     <form class="stack" data-form="start-round">
       <div class="field"><label for="hider-team">Hiding team</label><select id="hider-team" name="hiderTeam"><option value="alpha" ${game?.hiderTeam === "alpha" ? "selected" : ""}>${escapeHtml(game?.teams?.alpha?.name || TEAM_LABELS.alpha)}</option><option value="bravo" ${game?.hiderTeam === "bravo" ? "selected" : ""}>${escapeHtml(game?.teams?.bravo?.name || TEAM_LABELS.bravo)}</option></select></div>
       <div class="field"><label for="round-start">Round start</label><input id="round-start" name="roundStart" type="datetime-local" value="${localDate}" required /><span class="field-hint">Use now, or enter a mutually agreed start time.</span></div>
-      <div class="field-row"><div class="field"><label for="hide-minutes">Hiding period</label><input id="hide-minutes" name="hidingMinutes" type="number" min="1" value="45" /></div><div class="field"><label for="cutoff-minutes">Total round cutoff</label><input id="cutoff-minutes" name="cutoffMinutes" type="number" min="46" value="285" /></div></div>
-      <div class="callout warning">${icon("alert")}<p>At release, hiders must be inside a valid 500 m station-centred zone. Being in transit triggers a pause, backtrack and −30 minute penalty.</p></div>
+      <details class="manual-coordinate-details"><summary>Change the standard timings</summary><div class="field-row"><div class="field"><label for="hide-minutes">Hiding period</label><input id="hide-minutes" name="hidingMinutes" type="number" min="1" value="45" /></div><div class="field"><label for="cutoff-minutes">Total round cutoff</label><input id="cutoff-minutes" name="cutoffMinutes" type="number" min="46" value="285" /></div></div></details>
+      <div class="callout warning">${icon("alert")}<p>At release, hiders must be inside a valid 500 m station-centred zone.</p></div>
       <button class="button button-primary" type="submit">${icon("play")} Start round</button>
     </form>
   `);
@@ -188,16 +185,16 @@ function deductionCoordinateFields(prefix, label, current = null) {
   const lat = current?.lat != null ? Number(current.lat).toFixed(6) : "";
   const lng = current?.lng != null ? Number(current.lng).toFixed(6) : "";
   return `
-    <fieldset class="coordinate-pair compact-coordinate-pair">
+    <fieldset class="coordinate-pair compact-coordinate-pair simple-coordinate-pair">
       <legend>${escapeHtml(label)}</legend>
-      <div class="field-row"><div class="field"><label for="${prefix}-lat">Latitude</label><input id="${prefix}-lat" name="${prefix}Lat" type="number" inputmode="decimal" step="any" min="-90" max="90" value="${lat}" /></div><div class="field"><label for="${prefix}-lng">Longitude</label><input id="${prefix}-lng" name="${prefix}Lng" type="number" inputmode="decimal" step="any" min="-180" max="180" value="${lng}" /></div></div>
-      <button class="button button-soft button-small" type="button" data-action="deduction-fill-gps" data-prefix="${prefix}">${icon("location")} Use current GPS</button>
+      <button class="button button-soft" type="button" data-action="deduction-fill-gps" data-prefix="${prefix}">${icon("location")} Use current GPS</button>
+      <details class="manual-coordinate-details" ${lat && lng ? "open" : ""}><summary>Enter coordinates manually</summary><div class="field-row"><div class="field"><label for="${prefix}-lat">Latitude</label><input id="${prefix}-lat" name="${prefix}Lat" type="number" inputmode="decimal" step="any" min="-90" max="90" value="${lat}" /></div><div class="field"><label for="${prefix}-lng">Longitude</label><input id="${prefix}-lng" name="${prefix}Lng" type="number" inputmode="decimal" step="any" min="-180" max="180" value="${lng}" /></div></div></details>
     </fieldset>`;
 }
 
-function deductionMovementSelect(state) {
-  const locked = state.game?.phase === PHASES.ENDGAME;
-  return `<div class="field"><label for="deduction-movement">Movement rule for this answer</label><select id="deduction-movement" name="deductionMovementMode"><option value="mobile" ${locked ? "" : "selected"}>Before endgame — hider may move within the zone</option><option value="locked" ${locked ? "selected" : ""}>Endgame — fixed hiding spot</option></select></div>`;
+function deductionMovementInput(state) {
+  const mode = state.game?.phase === PHASES.ENDGAME ? "locked" : "mobile";
+  return `<input type="hidden" name="deductionMovementMode" value="${mode}" />`;
 }
 
 function deductionLineOptions() {
@@ -214,40 +211,33 @@ function questionDeductionFields(state, question) {
   const config = questionDeductionConfig(question);
   const importedFeatures = state.privateTeamState?.spatialData?.features || [];
   const categoryCount = config.category ? importedFeatures.filter((feature) => feature.category === config.category).length : 0;
+  const hidden = `<input type="hidden" name="deductionEnabled" value="on" />${deductionMovementInput(state)}`;
   let fields = "";
-  let badge = config.mode === "automatic" ? "Automatic area" : "Guided map review";
 
   if (config.mode === "guided") {
-    fields = `
-      <div class="callout warning">${icon("info")}<p><strong>Linked, not guessed.</strong>${escapeHtml(config.reason || "This answer needs seeker judgement.")} The answer will appear in the Deduction Map audit trail, where you can link a manual circle or polygon without using banned AI or reverse-image tools.</p></div>
-      ${deductionMovementSelect(state)}`;
-  } else if (question.category === "radar") {
-    fields = `${deductionCoordinateFields("deductionCentre", "Seeker radar pin", current)}${deductionMovementSelect(state)}`;
-  } else if (question.category === "thermometer") {
-    fields = `${deductionCoordinateFields("deductionStart", "Position before travelling")}${deductionCoordinateFields("deductionEnd", "Position after travelling", current)}${deductionMovementSelect(state)}`;
-  } else if (question.id === "matching-station-name") {
-    fields = `<div class="field"><label for="deduction-seeker-station">Seeker station</label><select id="deduction-seeker-station" name="deductionSeekerStationId"><option value="">Choose the definitive handbook name…</option>${STATIONS.map((station) => `<option value="${station.id}">${escapeHtml(station.name)}${station.note ? ` — ${escapeHtml(station.note)}` : ""}</option>`).join("")}</select></div>`;
-  } else if (question.id === "matching-rail-line") {
-    fields = `<div class="field"><label for="deduction-line">Line / operator preset</label><select id="deduction-line" name="deductionLineId">${deductionLineOptions()}</select></div><div class="field"><label for="deduction-stops">Exact stops in the game area (recommended when branches differ)</label><select id="deduction-stops" name="deductionStationIds" multiple size="7">${STATIONS.map((station) => `<option value="${station.id}">${escapeHtml(station.name)}${station.note ? ` — ${escapeHtml(station.note)}` : ""}</option>`).join("")}</select><span class="field-hint">Exact stops override the preset and make the filter match the particular train you are riding.</span></div>`;
-  } else if (question.id === "matching-landmass") {
-    fields = `<div class="field"><label for="deduction-thames-side">Seeker position</label><select id="deduction-thames-side" name="deductionSeekerSide"><option value="north">North of the Thames</option><option value="south">South of the Thames</option><option value="both">On a bridge / in a tunnel</option></select></div>${deductionMovementSelect(state)}`;
-  } else if (config.requiresSeekerPoint) {
-    const dataMessage = config.category
-      ? `<div class="callout ${categoryCount ? "" : "warning"}">${icon(categoryCount ? "check" : "info")}<p><strong>${categoryCount ? `${categoryCount} imported features ready.` : "Map layer needed."}</strong>${categoryCount ? `HideLine will use the imported ${escapeHtml(spatialCategoryLabel(config.category).toLowerCase())} layer.` : `The answer is still linked now, but it will remain unresolved until the authoritative ${escapeHtml(config.dataLabel || spatialCategoryLabel(config.category).toLowerCase())} layer is imported on the Deduction Map.`}</p></div>`
-      : "";
-    fields = `${deductionCoordinateFields("deductionSeeker", "Seeker pin used for this question", current)}${deductionMovementSelect(state)}${dataMessage}`;
-  } else {
-    fields = `${deductionMovementSelect(state)}`;
+    return `${hidden}<details class="deduction-question-fields simple-question-map-details"><summary><span>${icon("map")} Map note</span><span class="badge badge-neutral">Saved for review</span></summary><div class="stack deduction-question-body"><p class="muted small">${escapeHtml(config.reason || "This clue needs player judgement.")} HideLine records the answer but will not guess the excluded area.</p></div></details>`;
   }
 
-  return `
-    <details class="deduction-question-fields" open>
-      <summary><span>${icon("filter")} Link this answer to the Deduction Map</span><span class="badge ${config.mode === "automatic" ? "badge-mint" : "badge-yellow"}">${escapeHtml(badge)}</span></summary>
-      <div class="stack deduction-question-body">
-        <label class="checkbox-row"><input type="checkbox" name="deductionEnabled" data-action="deduction-enable-question" checked /><span><strong>Record this as a map-linked answer</strong><br><span class="field-hint">Shared question details remain visible to both teams. Eliminations, imported map data and seeker annotations remain private to the seeker team.</span></span></label>
-        <div class="deduction-auto-fields stack">${fields}</div>
-      </div>
-    </details>`;
+  if (question.category === "radar") {
+    fields = deductionCoordinateFields("deductionCentre", "Where the seekers asked the Radar question", current);
+  } else if (question.category === "thermometer") {
+    fields = `${deductionCoordinateFields("deductionStart", "Where the journey started")}${deductionCoordinateFields("deductionEnd", "Where the journey ended", current)}`;
+  } else if (question.id === "matching-station-name") {
+    fields = `<div class="field"><label for="deduction-seeker-station">Seeker station</label><select id="deduction-seeker-station" name="deductionSeekerStationId"><option value="">Choose the handbook station name…</option>${STATIONS.map((station) => `<option value="${station.id}">${escapeHtml(station.name)}${station.note ? ` — ${escapeHtml(station.note)}` : ""}</option>`).join("")}</select></div>`;
+  } else if (question.id === "matching-rail-line") {
+    fields = `<div class="field"><label for="deduction-line">Train line or operator</label><select id="deduction-line" name="deductionLineId">${deductionLineOptions()}</select></div><details class="manual-coordinate-details"><summary>Choose exact stops when branches differ</summary><div class="field"><label for="deduction-stops">Stops in the game area</label><select id="deduction-stops" name="deductionStationIds" multiple size="7">${STATIONS.map((station) => `<option value="${station.id}">${escapeHtml(station.name)}${station.note ? ` — ${escapeHtml(station.note)}` : ""}</option>`).join("")}</select><span class="field-hint">Exact stops override the broad line preset.</span></div></details>`;
+  } else if (question.id === "matching-landmass") {
+    fields = `<div class="field"><label for="deduction-thames-side">Where are the seekers?</label><select id="deduction-thames-side" name="deductionSeekerSide"><option value="north">North of the Thames</option><option value="south">South of the Thames</option><option value="both">On a bridge or in a tunnel</option></select></div>`;
+  } else if (config.requiresSeekerPoint) {
+    fields = deductionCoordinateFields("deductionSeeker", "Seeker pin used for this question", current);
+  }
+
+  const dataNote = config.category && !categoryCount
+    ? `<div class="callout warning">${icon("info")}<p>This answer will be saved now. ${escapeHtml(config.dataLabel || spatialCategoryLabel(config.category))} map data is needed before it can shade the map.</p></div>`
+    : config.category
+      ? `<p class="tiny muted">${categoryCount} matching map features are ready.</p>`
+      : "";
+  return `${hidden}<details class="deduction-question-fields simple-question-map-details" open><summary><span>${icon("map")} Information needed for the map</span><span class="badge badge-mint">Automatic</span></summary><div class="stack deduction-question-body">${fields}${dataNote}</div></details>`;
 }
 
 function askQuestionModal(state, questionId) {
@@ -256,16 +246,16 @@ function askQuestionModal(state, questionId) {
   const currentRound = state.game?.round || 1;
   const occurrence = state.questions.filter((record) => record.questionId === question.id && (record.round || 1) === currentRound).length + 1;
   const reward = repeatedReward(question, occurrence, state.settings.repeatRewardMode);
-  return frame(`Ask: ${escapeHtml(question.name)}`, `${question.responseSeconds / 60}-minute answer timer · repeat cost x${occurrence}`, `
-    <form class="stack" data-form="ask-question" data-question-id="${question.id}">
-      <div class="callout">${icon("questions")}<p><strong>${escapeHtml(question.prompt)}</strong><br>${escapeHtml(question.guidance)}</p></div>
-      <div class="grid grid-3"><div class="metric-card card"><span class="metric-label">Draw</span><strong class="metric-value">${reward.draw}</strong></div><div class="metric-card card"><span class="metric-label">Keep</span><strong class="metric-value">${reward.keep}</strong></div><div class="metric-card card"><span class="metric-label">Deadline</span><strong class="metric-value" style="font-size:1.6rem">${question.responseSeconds / 60} min</strong></div></div>
-      ${question.requiresPin ? `<div class="field"><label for="question-pin">Shared pin / location label</label><input id="question-pin" name="pinLabel" maxlength="120" placeholder="Paste a Google Maps pin or describe the pinned location" /><span class="field-hint">Share the actual pin with the hiders before submitting.</span></div>` : ""}
-      ${question.customInput ? `<div class="field"><label for="custom-value">Custom radius / parameter</label><input id="custom-value" name="customValue" maxlength="80" required placeholder="e.g. 7.4 km" /></div>` : ""}
+  return frame(`Ask: ${escapeHtml(question.name)}`, "Check the wording, add any map information and start the timer.", `
+    <form class="stack simple-ask-form" data-form="ask-question" data-question-id="${question.id}">
+      <div class="simple-modal-prompt"><strong>${escapeHtml(question.prompt)}</strong><p>${escapeHtml(question.guidance)}</p></div>
+      <div class="row wrap simple-question-facts"><span class="badge badge-blue">${question.responseSeconds / 60} min to answer</span><span class="badge badge-purple">Draw ${reward.draw}, keep ${reward.keep}</span>${occurrence > 1 ? `<span class="badge badge-yellow">Repeat x${occurrence}</span>` : ""}</div>
+      ${question.requiresPin ? `<div class="field"><label for="question-pin">Shared pin or location label</label><input id="question-pin" name="pinLabel" maxlength="120" placeholder="Paste the Google Maps pin or name the location" /><span class="field-hint">Share the actual pin with the hiders before asking.</span></div>` : ""}
+      ${question.customInput ? `<div class="field"><label for="custom-value">Custom distance or value</label><input id="custom-value" name="customValue" maxlength="80" required placeholder="e.g. 7.4 km" /></div>` : ""}
       ${questionDeductionFields(state, question)}
-      <div class="field"><label for="question-note">Optional clarification</label><textarea id="question-note" name="note" maxlength="400" placeholder="Line branch, endpoints, altitude, floor, POI interpretation..."></textarea></div>
-      <label class="checkbox-row"><input type="checkbox" name="confirmed" required /><span>I confirm no other question is currently awaiting an answer, and any required pin/transit intent has been shared.</span></label>
-      <button class="button button-primary" type="submit">${icon("clock")} Ask and start timer</button>
+      <details class="manual-coordinate-details"><summary>Add an optional clarification</summary><div class="field"><label for="question-note">Note</label><textarea id="question-note" name="note" maxlength="400" placeholder="Line branch, endpoints, floor, POI interpretation…"></textarea></div></details>
+      <label class="checkbox-row"><input type="checkbox" name="confirmed" required /><span>I have shared any required pin or transit notice, and no other question is waiting.</span></label>
+      <button class="button button-primary button-large" type="submit">${icon("clock")} Ask and start timer</button>
     </form>
   `);
 }

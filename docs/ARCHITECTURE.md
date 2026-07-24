@@ -4,7 +4,7 @@
 
 HideLine is a static progressive web app. `index.html` loads deploy-time public configuration, the CSS bundle and `src/app.js`. The app renders semantic HTML into one shell and keeps serialisable game state in a small observable store.
 
-No framework build output is committed or required. GitHub Pages can serve the repository directly.
+No framework build output is committed or required. GitHub Pages can serve the repository directly. The visible game-day shell has only three primary destinations—Game, Questions and Map—while lower-frequency controls remain in collapsed panels or settings.
 
 ## State boundaries
 
@@ -30,7 +30,7 @@ The client deliberately remains usable when Connected Mode is unavailable: Local
 
 The engine supports two location semantics:
 
-- **Mobile snapshot:** before endgame, every answer is evaluated independently. A station remains possible when its zone contains at least one valid point for each answer, even if those points differ between questions. The Answer Areas view can display one selected question, or a combined evidence overlay that greys a cell when any displayed answer excludes it. That combined overlay is visual only and is deliberately not fed back into mobile station elimination as a false fixed-location intersection.
+- **Mobile snapshot:** before endgame, every answer is evaluated independently. A station remains possible when its zone contains at least one valid point for each answer, even if those points differ between questions. The normal seeker view always displays a combined evidence overlay that greys a cell when any ready answer excludes it. The underlying engine can still resolve individual constraints for auditing, but technical layer selection is not exposed in the main interface. The combined overlay is visual only and is deliberately not fed back into mobile station elimination as a false fixed-location intersection.
 - **Endgame locked:** all locked location constraints are intersected at the same cell because the hider is fixed. The Endgame view renders only the selected station circle and its common surviving mask.
 
 Station-level filters such as station-name length and transit stops operate directly on the station catalogue. Area filters include Radar, Thermometer, exact-reference Measuring, nearest-feature Matching/Measuring, administrative-region matching, nearest-station Measuring, Thames-side matching, Tentacles and manual circles/polygons.
@@ -68,6 +68,6 @@ The service worker caches the same-origin application shell and source modules. 
 
 ## Testing strategy
 
-Core tests cover score ordering, 500 m distance behavior, pause accounting, station-name rules, repeated-question rewards, embedded coordinate completeness, 97-point viability sampling, full-circle visual-cell coverage, mobile-versus-locked movement semantics, combined all-answer masks, all-55-question mapping, manual polygons, nearest-feature regions, administrative polygons, Tentacles and Endgame intersections. Rendered-HTML tests also verify the all-answer control and the explicit Endgame exit control. `scripts/validate-data.mjs` checks the 100-station catalogue, embedded coordinates, question definitions, rail-line presets, planning polygon and install assets.
+Core tests cover score ordering, 500 m distance behavior, pause accounting, station-name rules, repeated-question rewards, embedded coordinate completeness, 97-point viability sampling, full-circle visual-cell coverage, mobile-versus-locked movement semantics, combined all-answer masks, all-55-question mapping, manual polygons, nearest-feature regions, administrative polygons, Tentacles and Endgame intersections. Rendered-HTML tests verify the combined-map default, the explicit Endgame exit control and the three-item primary navigation. `scripts/validate-data.mjs` checks the 100-station catalogue, embedded coordinates, question definitions, rail-line presets, planning polygon and install assets.
 
-The release process also runs JavaScript syntax checks, clean-extraction validation and desktop/mobile browser smoke tests for map masks, mode switching, station inspection, manual area controls and horizontal overflow.
+The release process also runs JavaScript syntax checks, clean-extraction validation and desktop/mobile browser smoke tests for the three-screen navigation, collapsed Game kit, question answering, map-information modal, combined masks, Endgame reset and horizontal overflow.

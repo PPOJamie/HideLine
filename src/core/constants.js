@@ -1,5 +1,5 @@
 export const APP_NAME = "HideLine";
-export const APP_VERSION = "1.3.0";
+export const APP_VERSION = "2.0.0";
 export const STORAGE_KEY = "hideline:v1:state";
 export const SETTINGS_KEY = "hideline:v1:settings";
 export const SUPABASE_MODULE_URL = "https://esm.sh/@supabase/supabase-js@2?bundle";
@@ -50,11 +50,11 @@ export const VIEWS = Object.freeze({
 });
 
 export const VIEW_META = Object.freeze({
-  play: { title: "Game board", subtitle: "Round control, teams and live timeline" },
-  map: { title: "Map & movement", subtitle: "Authoritative boundary, live deduction, hiding zone and transit intent" },
-  questions: { title: "Investigation", subtitle: "Ask, time and answer handbook questions" },
-  tools: { title: "Toolkit", subtitle: "Scores, cards, traps, stations and service status" },
-  rules: { title: "Rules", subtitle: "Fast, role-aware reference from the London handbook" }
+  play: { title: "Game", subtitle: "Timer, teams and the next action" },
+  map: { title: "Map", subtitle: "See what remains possible" },
+  questions: { title: "Questions", subtitle: "Ask, answer and update the map" },
+  tools: { title: "Game kit", subtitle: "Cards, traps and scoring" },
+  rules: { title: "Quick rules", subtitle: "The essentials for fair play" }
 });
 
 export const LOCAL_ROOM_PREFIX = "LOCAL";

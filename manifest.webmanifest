@@ -2,7 +2,7 @@
   "id": "./",
   "name": "HideLine - London Hide + Seek Companion",
   "short_name": "HideLine",
-  "description": "Combined all-answer exclusion masks, all 55 linked questions, a resettable Endgame circle, timers, scoring and team sync for London transit hide-and-seek.",
+  "description": "A simple game-day companion for London transit hide-and-seek: timer, questions, live deduction map and optional team sync.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -36,24 +36,24 @@
   ],
   "screenshots": [
     {
-      "src": "./assets/screenshot-mobile.png",
+      "src": "./assets/screenshot-simple-mobile.png",
       "sizes": "390x844",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Game dashboard"
+      "label": "Simple HideLine deduction map"
     },
     {
-      "src": "./assets/screenshot-desktop.png",
+      "src": "./assets/screenshot-simple-desktop.png",
       "sizes": "1440x1000",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "HideLine desktop dashboard"
+      "label": "Simple HideLine game dashboard"
     }
   ],
   "shortcuts": [
     {
-      "name": "Game board",
-      "short_name": "Play",
+      "name": "Game",
+      "short_name": "Game",
       "url": "./?view=play",
       "icons": [
         {
@@ -63,8 +63,8 @@
       ]
     },
     {
-      "name": "Ask a question",
-      "short_name": "Ask",
+      "name": "Questions",
+      "short_name": "Questions",
       "url": "./?view=questions",
       "icons": [
         {
@@ -74,9 +74,9 @@
       ]
     },
     {
-      "name": "Score tools",
-      "short_name": "Score",
-      "url": "./?view=tools",
+      "name": "Deduction map",
+      "short_name": "Map",
+      "url": "./?view=map",
       "icons": [
         {
           "src": "./assets/icon-192.png",

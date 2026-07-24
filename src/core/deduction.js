@@ -89,7 +89,7 @@ export function createDeductionRoundState() {
     showEliminated: true,
     showZones: true,
     showAreaMask: true,
-    mapDisplayMode: DEDUCTION_MAP_MODES.OVERVIEW,
+    mapDisplayMode: DEDUCTION_MAP_MODES.ANSWER,
     areaConstraintId: DEDUCTION_AREA_SELECTION_ALL,
     endgameStationId: null,
     maskScope: "all",

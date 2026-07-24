@@ -122,7 +122,9 @@ class HideLineApp {
 
   afterRender() {
     const state = this.store.get();
-    if (state.ui.view === VIEWS.MAP && state.ui.mapMode === "zone") {
+    const connectedHider = state.connection.mode === "connected" && state.game && state.profile.team === state.game.hiderTeam;
+    const effectiveMapMode = connectedHider && state.ui.mapMode === "deduction" ? "zone" : state.ui.mapMode;
+    if (state.ui.view === VIEWS.MAP && effectiveMapMode === "zone") {
       destroyDeductionMap();
       const station = this.stationMapObject();
       const positions = this.mapPositions();
@@ -132,7 +134,7 @@ class HideLineApp {
       });
       return;
     }
-    if (state.ui.view === VIEWS.MAP && state.ui.mapMode === "deduction") {
+    if (state.ui.view === VIEWS.MAP && effectiveMapMode === "deduction") {
       destroyZoneMap();
       const model = buildDeductionViewModel(state);
       if (!model.canView) {
@@ -270,6 +272,7 @@ class HideLineApp {
       switch (action) {
         case "navigate": this.store.patch("ui.view", button.dataset.view); this.updateUrlView(button.dataset.view); break;
         case "open-modal": this.openModal(button.dataset.modal); break;
+        case "open-game-kit": this.openGameKit(); break;
         case "close-modal": this.closeModal(); break;
         case "dismiss-toast": button.closest(".toast")?.remove(); break;
         case "install-app": await this.installApp(); break;
@@ -413,6 +416,13 @@ class HideLineApp {
     const url = new URL(location.href);
     url.searchParams.set("view", view);
     history.replaceState({}, "", url);
+  }
+
+  openGameKit() {
+    const kit = document.querySelector("details.game-kit");
+    if (!kit) return;
+    kit.open = true;
+    kit.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   async installApp() {
@@ -1093,7 +1103,7 @@ class HideLineApp {
 
   async setDeductionMapDisplay(mode) {
     const allowed = new Set(Object.values(DEDUCTION_MAP_MODES));
-    const nextMode = allowed.has(mode) ? mode : DEDUCTION_MAP_MODES.OVERVIEW;
+    const nextMode = allowed.has(mode) ? mode : DEDUCTION_MAP_MODES.ANSWER;
     if (nextMode !== DEDUCTION_MAP_MODES.ENDGAME) this.store.patch("ui.deductionSelectedStationId", null, { persist: true });
     await this.mutateDeduction((roundState) => {
       roundState.mapDisplayMode = nextMode;
@@ -1133,9 +1143,11 @@ class HideLineApp {
   async exitDeductionEndgameView() {
     this.store.patch("ui.deductionSelectedStationId", null, { persist: true });
     await this.mutateDeduction((roundState) => {
-      roundState.mapDisplayMode = DEDUCTION_MAP_MODES.OVERVIEW;
+      roundState.mapDisplayMode = DEDUCTION_MAP_MODES.ANSWER;
+      roundState.areaConstraintId = DEDUCTION_AREA_SELECTION_ALL;
       roundState.endgameStationId = null;
       roundState.maskScope = "all";
+      roundState.showAreaMask = true;
       roundState.showZones = true;
       roundState.showEliminated = true;
     }, { history: false });

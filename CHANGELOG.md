@@ -2,6 +2,21 @@
 
 All notable changes to HideLine are documented here.
 
+## 2.0.0 — Simplified game-day interface
+
+- Reduced the primary navigation to **Game**, **Questions** and **Map**.
+- Rebuilt the Game screen around the live timer, current role, one recommended next action and four concise shortcuts.
+- Moved cards, traps, transit, scoring and private station controls into one collapsed **Game kit**.
+- Rebuilt the Questions screen around the active question, category search and a collapsed history.
+- Made the combined all-answer deduction overlay the only normal seeker-map workflow; technical layer selection and manual builders are no longer exposed in the main interface.
+- Kept one dedicated Endgame view with a clear **Back to all stations** control.
+- Reduced the map to three understandable choices: **Find hiders**, **My zone** and **Official map**.
+- Collapsed map-data import, answer auditing, Connected Mode credentials and custom timing controls until they are needed.
+- Added role-aware private controls so connected seeker devices do not display the other team's station or card manager.
+- Added saved-state migration from the former Tools view and older deduction-map modes.
+- Added mobile layout refinements so the combined map appears within the first screen rather than below several configuration panels.
+- Updated install metadata, screenshots, tests, documentation and the service-worker cache. No Supabase migration is required.
+
 ## 1.3.0 — Combined exclusion overlay and Endgame reset
 
 - Added an **All linked answers — combined overlay** option that shows exclusions from every ready linked answer across all visible 500 m station circles at the same time.

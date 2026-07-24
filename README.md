@@ -1,97 +1,80 @@
 # HideLine — London Hide + Seek Companion
 
-HideLine is an installable, mobile-first progressive web app for the full-day, two-round London transit hide-and-seek format described in the supplied handbook. It is designed to replace scattered stopwatches, notes, question tables, score calculations and team updates with one clear game board.
+HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.0 focuses on one goal: **make the game easier to run without turning the app into another rulebook**.
 
-![HideLine desktop dashboard](assets/screenshot-desktop.png)
+![Simple HideLine game screen](assets/screenshot-simple-desktop.png)
 
-![HideLine detailed Answer Areas map](assets/screenshot-answer-areas-desktop.png)
+![Simple HideLine deduction map on mobile](assets/screenshot-simple-mobile.png)
 
-![HideLine mobile Endgame circle](assets/screenshot-endgame-mobile.png)
+## The game-day interface
 
-## What is included
+There are only three main screens:
 
-- **Guided two-round game control** with the standard 45-minute hiding period, seeker release, pause accounting, endgame, found confirmation and 4 h 45 min cutoff.
-- **A complete investigation workflow** for Matching, Measuring, Thermometer, Radar, Tentacles and Photo questions, including repeat multipliers, answer deadlines, evidence and an auditable history.
-- **A private Live Deduction Map** with a combined all-answer exclusion overlay inside every 500 m station circle, optional single-answer inspection, all 55 handbook questions linked to the audit trail, automatic POI/region/Tentacle geometry after map-data import, and a dedicated fixed-spot Endgame circle.
-- **The authoritative Google My Maps game layer** embedded in the app, plus separate deduction and zone-check maps with optional team positions and an explicitly labelled approximate boundary.
-- **All 100 handbook hiding stations**, searchable and randomisable, with station-name length support and a used-station tracker.
-- **Hider tools** for a private station, hiding notes, six-card hand management, power-ups/curses and timestamped time traps.
-- **Accurate round scoring** using time traps, percentage bonuses, fixed bonuses, curse adjustments, cures and other penalties.
-- **Transit and safety tools** for boarding/off-transit notices, optional location sharing, live TfL status, checklists and timestamped team messages.
-- **Local Mode** for one shared device with offline support and private photos stored in IndexedDB rather than browser text storage.
-- **Connected Mode** for team-mates and opponents on separate devices using optional Supabase real-time rooms, private team state, presence, private evidence storage and opt-in position visibility.
-- **Installable PWA** behavior, a responsive layout, dark-mode support, keyboard focus states and GitHub Pages deployment automation.
+1. **Game** — the round timer, the next action, team roles and recent updates.
+2. **Questions** — the complete question list, the active answer timer and question history.
+3. **Map** — the combined deduction map, the hider's 500 m zone and the official Google map.
 
-## Live Deduction Map
+Less-used controls are kept out of the main navigation:
 
-Open **Map → Deduction map** while your team is seeking. All deductions use one private audit trail, but the map has three deliberately different views:
+- Cards, traps, transit notices and scoring live in one collapsed **Game kit**.
+- Imported map data, answer auditing and deduction reset controls are collapsed below the map.
+- Quick rules and app settings remain available without taking space from the three game screens.
 
-1. **Overview** shows the viability of all 100 station-centred hiding zones.
-2. **Answer areas** defaults to **All linked answers — combined overlay** and clips a detailed cell mask to every visible 500 m circle. Grey means one or more ready answers excludes that cell, with darker grey indicating more exclusions. Green survives every displayed ready answer at that coordinate; amber still needs a required map layer or human review. The selector can still isolate any one answer for a clean single-question mask.
-3. **Endgame circle** hides the rest of London, shows only the chosen station's 500 m circle, and intersects every answer marked **Endgame — fixed hiding spot** at one common location.
+## What the app handles
 
-The station overview uses these statuses:
+- The 45-minute hiding period, pause-aware seeking time, Endgame and round cutoff.
+- All 55 handbook questions with the correct 5- or 10-minute answer timer and repeat reward display.
+- All 100 handbook hiding stations and their 500 m zones.
+- A private seeker deduction map that automatically combines every usable answer.
+- A dedicated fixed-location Endgame circle with a clear **Back to all stations** action.
+- Hider cards, time traps, transit notifications and the handbook score formula.
+- Optional room-code multiplayer with team-private station, card and deduction data.
+- Offline application-shell support after the first successful load.
 
-- **Green — possible:** the full sampled station zone remains compatible with the active deductions.
-- **Amber — partly possible:** at least one answer cuts through the station circle. Select **Inspect area** to see the surviving portion.
-- **Grey — eliminated:** no sampled point can satisfy an answer, or the seeker team eliminated the station manually.
-- **Purple — priority:** a still-possible station marked for attention by the seeker team.
+## The simplified deduction map
 
-### All questions are linked
+The seeker map no longer asks players to choose between technical layers. It always shows the combined result:
 
-Every one of the 55 handbook questions is mapped to one of two workflows:
+- **Green** — the coordinate remains possible.
+- **Grey** — at least one answered question excludes it.
+- **Amber** — the clue needs source map data or player judgement.
 
-- **Automatic area geometry:** Radar, Thermometer, station-name length, transit-line/exact-stop matching, Thames-side matching, nearest-feature matching, borough/constituency/ward matching, nearest-feature Measuring, nearest hiding-station Measuring and all four Tentacle categories.
-- **Guided map review:** altitude/floor and Photo questions. These remain linked to the answer record, but the seeker team draws a fair manual circle or polygon, or makes manual station decisions, instead of the app guessing from an image.
+The heading shows how many stations remain. The station list, answer audit and map setup are available below the map but stay collapsed until needed.
 
-POI, street/path and administrative questions need the same reference geometry used during play. In **Deduction Map → Map data**, import the Google My Maps export as **KML/KMZ**, or import compatible GeoJSON. HideLine classifies and simplifies the layers locally, then uses them for nearest-feature regions, distances, containment and Tentacle Voronoi-style areas. Radar, Thermometer, station-name, transit, nearest-station and Thames tools work without an import.
+Before Endgame, each answer is treated as a separate snapshot because the hiders may move within their station zone between questions. During Endgame, new answers are intersected at one fixed location because the hiders must remain at the hiding spot.
 
-For a Tentacle answer, HideLine first selects only the imported POIs of that category within 2 km of the seeker's pinned location. It then keeps the parts of each hiding circle from which the named POI is the closest member of that valid set.
+Radar, Thermometer, station-name, transit-line and Thames-side deductions work immediately. Tentacles and questions based on curated points of interest or administrative boundaries need the Google My Maps KML/KMZ imported once under **Map setup and reset**. When source geometry is unavailable, HideLine marks the clue as unresolved rather than inventing an answer.
 
-### Movement-aware area logic
-
-Before endgame, each answer is a separate location snapshot because the hider can move within the same 500 m station zone between questions. The combined Answer Areas view is therefore presented as an **evidence overlay**, not as proof that the hider remained at one fixed point. It shows every exclusion together for planning, while the station viability engine continues to assess each mobile answer separately. A station is not eliminated merely because the combined overlay has no single common green cell when different answers could have been given from different points in its zone.
-
-Use **Show all areas** above the linked-answer list to return to the combined overlay after inspecting one question. Use **Show all circles** in the Endgame view, or select **Overview**, to clear the Endgame focus and fit the complete station map again without deleting any deductions.
-
-Once endgame has genuinely begun, new answers are marked **Endgame — fixed hiding spot** automatically. The **Endgame circle** intersects those locked answers because they must all be true at the same physical point. All 100 stations remain selectable in that view so an earlier mistaken deduction cannot prevent the team from opening the correct circle.
-
-The detailed mask is a high-resolution planning grid clipped to the exact 500 m circle. It is intentionally presented as an approximation: use the authoritative game map and normal player judgement for borderline paths, entrances, disputed POIs and source-layer inaccuracies.
-
-In Connected Mode, the elimination board, imported geometry, manual areas, ignored answers, priority marks and Endgame mask are stored in the seeker team's private state. Opponents still see the shared question details needed to answer, but not the seeker's deductions.
+The deduction grid is a planning aid. The official game map and normal player judgement remain authoritative for borderline paths, entrances, station pins and disputed points of interest.
 
 ## Run locally
 
-Requirements: Node.js 20 or newer. There are no npm runtime dependencies and no build step.
+Requirements: Node.js 20 or newer. There are no runtime npm dependencies and no build step.
 
 ```bash
 npm run check
 npm run dev
 ```
 
-Open the local address printed in the terminal, normally `http://127.0.0.1:4173`.
-
-A service worker cannot provide normal offline behavior when the app is opened directly with `file://`; use the development server or a deployed HTTPS site.
+Open the address printed in the terminal, normally `http://127.0.0.1:4173`.
 
 ## Publish with GitHub Pages
 
-1. Create an empty GitHub repository.
-2. Upload the complete contents of this folder, including `.github`, `.nojekyll` and all subfolders.
-3. Commit to the `main` branch.
-4. In the repository, open **Settings → Pages** and choose **GitHub Actions** as the source.
-5. The included workflow runs validation/tests and publishes the site.
+1. Upload the complete contents of this repository to the `main` branch.
+2. Open **Settings → Pages** in GitHub.
+3. Choose **GitHub Actions** as the source.
+4. The included workflow validates the data, runs the tests and deploys the static app.
 
-The app uses relative URLs, so it works from both a user/organisation Pages site and a project subpath.
+The app uses relative URLs, so it works from a GitHub project subpath such as `https://USERNAME.github.io/HideLine/`.
 
 ## Enable Connected Mode
 
-Local Mode works immediately. Connected Mode needs a Supabase project:
+Local Mode works immediately. Connected Mode requires a Supabase project:
 
-1. Create a Supabase project.
-2. Enable **Authentication → Providers → Anonymous Sign-Ins**.
-3. For a new project, run [`supabase/migrations/001_hideline.sql`](supabase/migrations/001_hideline.sql) once in the Supabase SQL editor. If the project was originally created with HideLine 1.0, also run [`supabase/migrations/002_deduction_map.sql`](supabase/migrations/002_deduction_map.sql). HideLine 1.3 needs no additional database migration.
-4. Copy the project URL and anon key from the project API settings.
-5. Either place them in `config.js` or enter them in HideLine's Settings screen.
+1. Enable anonymous sign-ins in Supabase.
+2. For a new installation, run [`supabase/migrations/001_hideline.sql`](supabase/migrations/001_hideline.sql).
+3. An installation originally created with HideLine 1.0 must also run [`supabase/migrations/002_deduction_map.sql`](supabase/migrations/002_deduction_map.sql).
+4. Put the project URL and public anon key in `config.js`, or enter them under **Settings → Connected Mode setup**.
 
 ```js
 window.HIDELINE_CONFIG = {
@@ -101,70 +84,59 @@ window.HIDELINE_CONFIG = {
 };
 ```
 
-The anon key is public by design. The included Row Level Security policies provide the access boundary. Review the schema, retention model and abuse controls before operating a public service. Full setup details are in [`supabase/README.md`](supabase/README.md).
+HideLine 2.0 requires **no new Supabase migration** when upgrading from 1.1, 1.2 or 1.3. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
 
-## How the multiplayer privacy model works
+## Privacy model
 
-- Room data and the player roster are visible only to authenticated room members.
-- A team's selected hiding station, card hand, private notes, imported spatial layers and per-round deduction/Endgame boards are kept in a team-only row.
-- Location sharing is off until a player starts it. Hider-side sharing defaults to the same team; seeker-side sharing can be visible to all room members.
-- Connected photo evidence is compressed in the browser, uploaded to a private bucket and viewed through a short-lived signed URL.
-- Local Mode photos remain in that browser's IndexedDB and are not included in the JSON export.
-- Changing team in Connected Mode immediately changes which private team state the device may read.
+- The selected hiding station, hider cards and seeker deductions are stored in team-private state.
+- A connected hider device cannot open the seeker deduction map.
+- Location sharing is opt-in and hider sharing defaults to the hider team only.
+- Connected photo answers use a private storage bucket and short-lived signed links.
+- Local photo answers stay in the browser's IndexedDB.
 
-Read [`PRIVACY.md`](PRIVACY.md) before deployment.
+Read [`PRIVACY.md`](PRIVACY.md) before operating a public deployment.
 
-## Map accuracy and game adjudication
+## Important safeguards
 
-The embedded Google My Maps layer remains the authoritative boundary/POI reference for play. The Leaflet/OpenStreetMap surface, mask grid, embedded station centres and simplified Thames centreline are planning tools and must not overrule the source map.
-
-Importing the My Maps KML/KMZ allows HideLine to calculate from the actual exported POI, line and polygon geometry rather than inventing substitute locations. Classification depends on layer/name labels, so review the imported category counts and keep unclassified features out of automatic deductions until they are correctly labelled in the source or supplied as GeoJSON with a `category` property.
-
-All 100 station centres are embedded so the station engine and Zone Check work without geocoding. When Leaflet or online tiles are unavailable, the Deduction Map switches to a built-in vector map that still renders station statuses, detailed cell masks and supported overlays. Selected Answer Areas and Endgame automatically focus on the chosen 500 m circle in this fallback. GPS, source-map access, fresh tiles and live transport data remain network-dependent. Always check that the selected station is open and reasonably accessible on game day.
-
-## Important gameplay safeguards
-
-HideLine supports the handbook; it does not replace judgement. In particular:
-
-- Real-world safety, staff instructions, access rules and transport rules always take precedence.
+- Stop walking before using the app near roads, stairs or platforms.
+- Follow transport staff instructions and real-world access restrictions.
 - Do not use Street View, reverse-image search or AI to solve the opponent's location.
-- A hider must be in a valid station-centred 500 m zone at release; the handbook's backtrack/pause and penalty rule applies otherwise.
-- Endgame should be confirmed only when seekers are inside the hiding zone and off transit.
-- “Found” means within 2 m **and** the hiders have been spotted.
-- Avoid underground/no-signal hiding spots, nuisance locations and photographs that unnecessarily identify bystanders.
+- At seeker release, hiders must be inside a valid station-centred 500 m zone.
+- Confirm Endgame only when the seekers are inside the hiding zone and off transit.
+- “Found” means the seekers are within 2 m and have spotted the hiders.
 
 ## Project structure
 
 ```text
 .
-├── .github/workflows/pages.yml      # test and GitHub Pages deployment
+├── .github/workflows/pages.yml      # tests and GitHub Pages deployment
 ├── assets/                           # icons and install screenshots
-├── docs/                             # supplied handbook and architecture notes
+├── docs/                             # handbook and architecture notes
 ├── scripts/                          # local server and data validation
 ├── src/
-│   ├── core/                         # state, timing, score, geography, spatial and deduction engines
-│   ├── data/                         # stations, coordinates, questions, map links, rules and boundary
-│   ├── services/                     # map, KML/KMZ import, location, TfL, Supabase and evidence
+│   ├── core/                         # state, timing, scoring and deduction engine
+│   ├── data/                         # stations, coordinates, questions and rules
+│   ├── services/                     # maps, location, Supabase and evidence
 │   └── ui/                           # accessible HTML renderers
-├── supabase/migrations/              # Connected Mode schema/RLS/storage setup
-├── tests/                            # deterministic core tests
-├── config.js                         # deploy-time public configuration
-├── manifest.webmanifest              # PWA metadata
+├── supabase/migrations/              # Connected Mode schema and policies
+├── tests/                            # deterministic core and UI tests
+├── config.js                         # public deployment configuration
+├── manifest.webmanifest              # install metadata
 └── service-worker.js                 # offline application shell
 ```
 
 ## Quality checks
 
 ```bash
-npm run validate   # verifies stations, embedded coordinates, questions, line presets and assets
-npm test           # runs timing, score, area masks, all-question mapping, Tentacles and Endgame tests
-npm run check      # runs both
+npm run validate
+npm test
+npm run check
 ```
 
-The source is plain standards-based HTML, CSS and JavaScript. This keeps the repository easy to inspect, fork and deploy without a framework build chain.
+The project is plain HTML, CSS and JavaScript so it remains easy to inspect, change and upload directly to GitHub.
 
 ## Licence and third-party material
 
-The original HideLine source code is MIT licensed. The supplied handbook, Google map content, service names, map tiles and external libraries/services have their own owners and terms; they are not relicensed by this repository. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Confirm that you have permission before publishing the handbook or any private map publicly.
+The original HideLine source is MIT licensed. The supplied handbook, Google map content, transport names, external services and map tiles retain their respective ownership and terms. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 HideLine is an independent companion implementation and is not an official product of the creators or publishers of any referenced game, map or transport service.

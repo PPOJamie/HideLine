@@ -1,54 +1,31 @@
 import { GAME_MAP_URL } from "../core/constants.js";
 import { escapeHtml } from "../core/format.js";
-import { NOT_USED_QUESTIONS, QUESTION_CATEGORIES } from "../data/questions.js";
-import { GLOSSARY, QUICK_RULES, SAFETY_NOTES, SCHEDULE } from "../data/rules.js";
+import { QUICK_RULES } from "../data/rules.js";
 import { icon } from "./icons.js";
 
 function ruleList(items) {
-  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
-}
-
-function scheduleTable(rows) {
-  return `<div class="schedule">${rows.map((row) => `<div class="schedule-row"><div class="schedule-time">${row.time}</div><div><strong>${escapeHtml(row.title)}</strong><span>${escapeHtml(row.detail)}</span></div></div>`).join("")}</div>`;
+  return `<ul class="simple-rule-list">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
 
 export function renderRulesView() {
-  return `
-    <div class="view-stack">
-      <section class="card card-dark card-pad hero" style="min-height:220px">
-        <div class="hero-copy"><p class="eyebrow">Fast reference</p><h2>Fair decisions without digging through fifteen pages.</h2><p>These summaries are designed for play. For edge cases, open the supplied handbook and use the authoritative Google map layer.</p><div class="hero-actions"><a class="button button-primary" href="./docs/Hide-and-Seek-London-Handbook.pdf" target="_blank" rel="noopener">${icon("bookOpen")} Open full handbook</a><a class="button button-ghost" href="${GAME_MAP_URL}" target="_blank" rel="noopener">${icon("map")} Open game map</a></div></div>
-        <div class="hero-visual" aria-hidden="true"><div class="route-orbit"><span class="route-node n1"></span><span class="route-node n2"></span><span class="route-node n3"></span></div></div>
-      </section>
+  return `<div class="view-stack simple-rules-view">
+    <section class="card card-dark card-pad simple-rules-hero"><div><p class="eyebrow">Quick reference</p><h2>The rules you need during play.</h2><p>Use this page for common decisions. Open the full handbook only for an unusual edge case.</p></div><div class="row wrap"><button class="button button-primary" type="button" data-action="navigate" data-view="play">${icon("play")} Back to game</button><a class="button button-ghost" href="./docs/Hide-and-Seek-London-Handbook.pdf" target="_blank" rel="noopener">${icon("bookOpen")} Full handbook</a><a class="button button-ghost" href="${GAME_MAP_URL}" target="_blank" rel="noopener">${icon("map")} Official map</a></div></section>
 
-      <div class="grid grid-3">
-        <section class="card card-pad rule-section"><div class="section-head"><div><p class="eyebrow">Role guide</p><h2>Hiders</h2></div></div><details open><summary>Core rules</summary><div class="rule-body">${ruleList(QUICK_RULES.hider)}</div></details></section>
-        <section class="card card-pad rule-section"><div class="section-head"><div><p class="eyebrow">Role guide</p><h2>Seekers</h2></div></div><details open><summary>Core rules</summary><div class="rule-body">${ruleList(QUICK_RULES.seeker)}</div></details></section>
-        <section class="card card-pad rule-section"><div class="section-head"><div><p class="eyebrow">Shared guide</p><h2>Both teams</h2></div></div><details open><summary>Core rules</summary><div class="rule-body">${ruleList(QUICK_RULES.both)}</div></details></section>
-      </div>
+    <section class="simple-numbers-grid">
+      <article class="card card-pad"><strong>45 min</strong><span>Hiding period</span></article>
+      <article class="card card-pad"><strong>500 m</strong><span>Station zone</span></article>
+      <article class="card card-pad"><strong>5 / 10 min</strong><span>Normal / photo answer</span></article>
+      <article class="card card-pad"><strong>2 m</strong><span>Found and spotted</span></article>
+    </section>
 
-      <div class="grid grid-main">
-        <section class="card card-pad rule-section">
-          <div class="section-head"><div><h2>Investigation categories</h2><p>Response time and hider reward for each available category.</p></div></div>
-          <div style="overflow:auto"><table class="rule-table"><thead><tr><th>Category</th><th>Format</th><th>Response</th><th>Reward</th><th>Answers</th></tr></thead><tbody>${Object.values(QUESTION_CATEGORIES).map((category) => `<tr><td><strong>${escapeHtml(category.name)}</strong></td><td>${escapeHtml(category.format)}</td><td>${category.responseSeconds / 60} min</td><td>Draw ${category.reward.draw}, keep ${category.reward.keep}</td><td>${escapeHtml(category.answers.join(" / "))}</td></tr>`).join("")}</tbody></table></div>
-          <details><summary>Questions not normally used</summary><div class="rule-body"><p>A randomise power-up may bring greyed-out questions back into play. Otherwise, the London version excludes:</p>${ruleList(NOT_USED_QUESTIONS)}</div></details>
-          <details><summary>Answer timing</summary><div class="rule-body"><ul><li>Normal questions: 5 minutes.</li><li>Photo questions: 10 minutes for this small/medium setup.</li><li>Late answers require a game pause until complete and earn no reward.</li><li>Answers use the hider's physical location at the moment of answering, unless endgame prevents movement.</li></ul></div></details>
-          <details><summary>Photo protections</summary><div class="rule-body"><ul><li>Repeated photo asks should produce a meaningfully different image.</li><li>Censor only uniquely identifying text and keep the location matchable in person.</li><li>When a movement-dependent photo is asked and seekers are within 10 minutes of the zone, hiders may pause to take it and return.</li><li>During endgame, answer “I/we can't answer that” where the image cannot be taken without moving.</li></ul></div></details>
-        </section>
-        <aside class="stack">
-          <section class="card card-pad"><div class="section-head"><div><h2>Numbers to remember</h2></div></div><div class="score-breakdown"><div class="score-row"><span>Hiding period</span><span>45 min</span></div><div class="score-row"><span>Hiding-zone radius</span><span>500 m</span></div><div class="score-row"><span>Found distance</span><span>2 m + spotted</span></div><div class="score-row"><span>Round cutoff</span><span>4 h 45 min</span></div><div class="score-row"><span>Default hand limit</span><span>6 cards</span></div><div class="score-row"><span>Invalid-zone penalty</span><span>−30 min</span></div><div class="score-row"><span>Curse cure reward</span><span>+45 min</span></div></div></section>
-          <section class="callout danger">${icon("eye")}<p><strong>Investigation ban</strong>Do not use Google Street View, reverse-image search or AI tools to identify the hiding location.</p></section>
-        </aside>
-      </div>
-
-      <div class="grid grid-2">
-        <section class="card card-pad"><div class="section-head"><div><p class="eyebrow">Round 1</p><h2>Morning schedule</h2></div></div>${scheduleTable(SCHEDULE.round1)}</section>
-        <section class="card card-pad"><div class="section-head"><div><p class="eyebrow">Round 2</p><h2>Afternoon schedule</h2></div></div>${scheduleTable(SCHEDULE.round2)}</section>
-      </div>
-
-      <div class="grid grid-main">
-        <section class="card card-pad rule-section"><div class="section-head"><div><h2>Glossary</h2><p>Terms used by the timers and score calculator.</p></div></div>${GLOSSARY.map((item) => `<details><summary>${escapeHtml(item.term)}</summary><div class="rule-body">${escapeHtml(item.definition)}</div></details>`).join("")}</section>
-        <aside class="card card-pad rule-section"><div class="section-head"><div><h2>Safety and practicalities</h2></div></div>${ruleList(SAFETY_NOTES)}<div class="callout warning">${icon("alert")}<p><strong>Real-world rules win.</strong>Staff instructions, transport rules, accessibility needs and personal safety always override game mechanics.</p></div></aside>
-      </div>
+    <div class="grid grid-3 simple-rule-grid">
+      <section class="card card-pad"><div class="section-head"><div><p class="eyebrow">Hiders</p><h2>Stay legal and answer</h2></div></div>${ruleList(QUICK_RULES.hider.slice(0, 8))}</section>
+      <section class="card card-pad"><div class="section-head"><div><p class="eyebrow">Seekers</p><h2>Ask fairly</h2></div></div>${ruleList(QUICK_RULES.seeker.slice(0, 8))}</section>
+      <section class="card card-pad"><div class="section-head"><div><p class="eyebrow">Both teams</p><h2>Keep the game moving</h2></div></div>${ruleList(QUICK_RULES.both.slice(0, 8))}</section>
     </div>
-  `;
+
+    <section class="card card-pad simple-key-decisions"><div class="section-head"><div><h2>Three decisions that often matter</h2></div></div><div class="simple-decision-grid"><article><span>${icon("train")}</span><div><strong>Tell the hiders before and after train travel</strong><p>Share the starting station while signal is reliable.</p></div></article><article><span>${icon("clock")}</span><div><strong>Late answer means a pause and no reward</strong><p>Normal questions have five minutes; photos have ten.</p></div></article><article><span>${icon("target")}</span><div><strong>Endgame means the hiders stay put</strong><p>If seekers leave the zone by train after an accidental trigger, movement can resume.</p></div></article></div></section>
+
+    <section class="callout danger">${icon("eye")}<p><strong>Do not use Street View, reverse-image search or AI to identify the hiding location.</strong> Staff instructions, transport rules, accessibility needs and personal safety always override the game.</p></section>
+  </div>`;
 }
