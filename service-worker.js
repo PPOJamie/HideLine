@@ -1,5 +1,5 @@
 const CACHE_VERSION = "hideline-shell-v1.2.0";
-const RUNTIME_CACHE = "hideline-runtime-v1.1.0";
+const RUNTIME_CACHE = "hideline-runtime-v1.2.0";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -20,8 +20,10 @@ const APP_SHELL = [
   "./src/core/score.js",
   "./src/core/store.js",
   "./src/core/deduction.js",
+  "./src/core/spatial.js",
   "./src/data/stations.js",
   "./src/data/questions.js",
+  "./src/data/question-deduction.js",
   "./src/data/rules.js",
   "./src/data/boundary.js",
   "./src/data/station-geo.js",
@@ -30,6 +32,7 @@ const APP_SHELL = [
   "./src/services/media.js",
   "./src/services/evidence.js",
   "./src/services/map.js",
+  "./src/services/spatial-data.js",
   "./src/services/stations.js",
   "./src/services/supabase.js",
   "./src/ui/icons.js",

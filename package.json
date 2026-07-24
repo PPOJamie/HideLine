@@ -1,8 +1,8 @@
 {
   "name": "hideline-london-companion",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "An installable, multiplayer-ready companion PWA for a full-day London transit hide-and-seek game.",
+  "description": "An installable, multiplayer-ready London hide-and-seek companion with exact answer-area masks, a linked Endgame map and all 55 handbook questions.",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev-server.mjs",

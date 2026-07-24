@@ -4,7 +4,7 @@ import { randomId, roomCode } from "./format.js";
 
 export function createDefaultState() {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     profile: {
       id: localStorage.getItem("hideline:device-id") || randomId("device"),
       name: "Player",
@@ -40,7 +40,8 @@ export function createDefaultState() {
       cards: [],
       handLimit: DEFAULT_DURATIONS.handLimit,
       privateNotes: "",
-      deductionByRound: {}
+      deductionByRound: {},
+      spatialData: { version: 1, sourceName: "No map data imported", importedAt: null, features: [] }
     },
     questions: [],
     events: [],

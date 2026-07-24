@@ -1,5 +1,7 @@
 import { STATIONS, stationNameLength } from "../src/data/stations.js";
 import { QUESTIONS, QUESTION_CATEGORIES } from "../src/data/questions.js";
+import { QUESTION_DEDUCTION } from "../src/data/question-deduction.js";
+import { APP_VERSION } from "../src/core/constants.js";
 import { APPROXIMATE_GAME_BOUNDARY } from "../src/data/boundary.js";
 import { RAIL_LINES, STATION_GEO } from "../src/data/station-geo.js";
 import { access, readFile } from "node:fs/promises";
@@ -25,8 +27,14 @@ assert(QUESTIONS.length >= 45, `Expected a comprehensive question catalogue, fou
 assert(new Set(QUESTIONS.map((question) => question.id)).size === QUESTIONS.length, "Question IDs must be unique.");
 assert(QUESTIONS.every((question) => QUESTION_CATEGORIES[question.category]), "Every question must reference a known category.");
 assert(QUESTIONS.every((question) => question.responseSeconds === 300 || question.responseSeconds === 600), "Question response time must be five or ten minutes.");
+assert(Object.keys(QUESTION_DEDUCTION).length === QUESTIONS.length, "Every handbook question must have exactly one deduction-map capability entry.");
+assert(QUESTIONS.every((question) => QUESTION_DEDUCTION[question.id]), "Every handbook question must be linked to the deduction-map audit trail.");
+assert(Object.keys(QUESTION_DEDUCTION).every((id) => QUESTIONS.some((question) => question.id === id)), "The deduction capability map must not contain unknown question IDs.");
 assert(APPROXIMATE_GAME_BOUNDARY.length >= 4, "The planning boundary needs at least four coordinates.");
 assert(JSON.stringify(APPROXIMATE_GAME_BOUNDARY[0]) === JSON.stringify(APPROXIMATE_GAME_BOUNDARY.at(-1)), "The planning polygon must be closed.");
+
+const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+assert(packageJson.version === APP_VERSION, `package.json version ${packageJson.version} must match app version ${APP_VERSION}.`);
 
 const manifest = JSON.parse(await readFile(resolve(root, "manifest.webmanifest"), "utf8"));
 const manifestFiles = [
@@ -52,4 +60,4 @@ if (failures.length) {
   console.error(failures.map((failure) => `- ${failure}`).join("\n"));
   process.exit(1);
 }
-console.log(`Validated ${STATIONS.length} stations and coordinates, ${QUESTIONS.length} questions, ${RAIL_LINES.length} line presets, the planning boundary and install assets.`);
+console.log(`Validated HideLine ${APP_VERSION}: ${STATIONS.length} stations and coordinates, all ${QUESTIONS.length} linked questions, ${RAIL_LINES.length} line presets, the planning boundary and install assets.`);

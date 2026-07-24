@@ -3,9 +3,13 @@ import { PHASES } from "../core/constants.js";
 import { escapeHtml, relativeTime } from "../core/format.js";
 import { formatDuration, questionSecondsRemaining } from "../core/time.js";
 import { icon } from "./icons.js";
+import { questionDeductionConfig, questionDeductionKind } from "../data/question-deduction.js";
 
-const MAP_READY_QUESTION_IDS = new Set(["matching-rail-line", "matching-station-name", "matching-landmass"]);
-function isMapReady(question) { return MAP_READY_QUESTION_IDS.has(question.id) || question.category === "radar" || question.category === "thermometer"; }
+function deductionBadge(question) {
+  const config = questionDeductionConfig(question);
+  const badge = config.mode === "automatic" ? "badge-mint" : "badge-yellow";
+  return `<span class="badge ${badge}">${questionDeductionKind(question)}</span>`;
+}
 
 function categoryIcon(category) {
   const name = QUESTION_CATEGORIES[category]?.symbol || "questions";
@@ -35,7 +39,7 @@ function renderActiveQuestion(record, state, now, canAnswer) {
         <span class="badge badge-purple">Draw ${record.reward?.draw ?? definition.reward?.draw}, keep ${record.reward?.keep ?? definition.reward?.keep}</span>
         <span class="badge ${overdue ? "badge-red" : "badge-blue"}">${definition.photo ? "10 min" : "5 min"} response</span>
         ${record.pinLabel ? `<span class="badge badge-mint">Pin: ${escapeHtml(record.pinLabel)}</span>` : ""}
-        ${record.deductionInput ? `<span class="badge badge-mint">Map-ready answer</span>` : ""}
+        ${record.deductionInput ? `<span class="badge ${record.deductionInput.type === "manual-review" ? "badge-yellow" : "badge-mint"}">${record.deductionInput.type === "manual-review" ? "Guided map review" : "Map-linked answer"}</span>` : ""}
       </div>
       ${canAnswer ? `
         <div class="answer-grid">
@@ -72,7 +76,7 @@ function renderQuestionCard(question, state, canAsk, unavailableLabel) {
         <span class="badge badge-blue">${question.responseSeconds / 60} min</span>
         ${question.requiresPin ? `<span class="badge badge-mint">Share a pin</span>` : ""}
         ${question.endgameFriendly ? `<span class="badge badge-orange">Endgame-friendly</span>` : ""}
-        ${isMapReady(question) ? `<span class="badge badge-mint">Deduction map</span>` : ""}
+        ${deductionBadge(question)}
       </div>
       <div class="row-between wrap"><span class="tiny muted">${escapeHtml(question.guidance)}</span><button class="button ${canAsk ? "button-primary" : "button-soft"} button-small" type="button" data-action="open-ask-question" data-question-id="${question.id}" ${canAsk ? "" : "disabled"}>${icon(canAsk ? "questions" : "clock")} ${canAsk ? "Ask" : escapeHtml(unavailableLabel)}</button></div>
     </article>

@@ -5,12 +5,14 @@ import { activeElapsedSeconds, formatDuration, parseDurationParts, questionSecon
 import { downloadJson, escapeHtml, number, randomId, roomCode } from "./core/format.js";
 import { haversineMetres } from "./core/geo.js";
 import {
+  DEDUCTION_MAP_MODES,
   DEDUCTION_MOVEMENT,
   DEDUCTION_TOOL_TYPES,
   createDeductionRoundState,
   normaliseDeductionRoundState
 } from "./core/deduction.js";
 import { QUESTION_BY_ID, repeatedReward } from "./data/questions.js";
+import { questionDeductionConfig } from "./data/question-deduction.js";
 import { STATIONS, STATION_BY_ID, stationNameLength } from "./data/stations.js";
 import { STATION_GEO_BY_ID } from "./data/station-geo.js";
 import { SupabaseSync } from "./services/supabase.js";
@@ -18,6 +20,8 @@ import { LocationService } from "./services/geolocation.js";
 import { compressImage } from "./services/media.js";
 import { clearEvidenceStore, getLocalEvidenceUrl, saveLocalEvidence } from "./services/evidence.js";
 import { fetchTflStatus } from "./services/tfl.js";
+import { fetchConfiguredSpatialData, parseSpatialDataFile } from "./services/spatial-data.js";
+import { normaliseSpatialData } from "./core/spatial.js";
 import { cachedStationCoordinates, resolveStationCoordinates } from "./services/stations.js";
 import {
   beginDeductionMapPick,
@@ -139,6 +143,12 @@ class HideLineApp {
         constraints: model.constraints,
         showEliminated: model.roundState.showEliminated,
         showZones: model.roundState.showZones,
+        showAreaMask: model.roundState.showAreaMask,
+        displayMode: model.roundState.mapDisplayMode,
+        maskScope: model.roundState.maskScope,
+        activeConstraint: model.activeAreaConstraint,
+        endgameStation: model.endgameStation,
+        spatialFeatures: model.spatialData.features,
         selectedStationId: state.ui.deductionSelectedStationId || null,
         onStationAction: (action, id) => {
           const promise = action === "deduction-toggle-priority"
@@ -261,15 +271,22 @@ class HideLineApp {
         case "dismiss-toast": button.closest(".toast")?.remove(); break;
         case "install-app": await this.installApp(); break;
         case "map-mode": cancelDeductionMapPick(); this.store.patch("ui.mapMode", button.dataset.mode); break;
+        case "deduction-map-display": await this.updateDeductionPreference("mapDisplayMode", button.dataset.mode); break;
+        case "deduction-show-constraint": await this.showDeductionConstraint(button.dataset.id); break;
         case "deduction-fill-gps": await this.fillDeductionCoordinates(button.dataset.prefix, button); break;
         case "deduction-pick-map": this.startDeductionMapPick(button.dataset.prefix, button); break;
+        case "deduction-pick-vertex": this.startDeductionVertexPick(button); break;
+        case "deduction-clear-vertices": this.clearDeductionVertices(button); break;
         case "deduction-focus-station": this.focusDeductionStation(button.dataset.id); break;
+        case "deduction-inspect-station": await this.inspectDeductionStation(button.dataset.id, button.dataset.constraintId, button.dataset.mode); break;
         case "deduction-toggle-eliminated": await this.toggleDeductionStationEliminated(button.dataset.id); break;
         case "deduction-toggle-priority": await this.toggleDeductionStationPriority(button.dataset.id); break;
         case "deduction-toggle-auto": await this.toggleAutomaticDeduction(button.dataset.id); break;
         case "deduction-remove-constraint": await this.removeDeductionConstraint(button.dataset.id); break;
         case "deduction-undo": await this.undoDeduction(); break;
         case "deduction-reset": await this.resetDeductionRound(); break;
+        case "spatial-data-load-configured": await this.loadConfiguredSpatialData(button); break;
+        case "spatial-data-clear": await this.clearSpatialData(); break;
         case "tool-tab": this.store.patch("ui.selectedTool", button.dataset.tool); break;
         case "question-category": this.store.patch("ui.questionCategory", button.dataset.category); break;
         case "open-ask-question": this.assertCanAskQuestion(); this.openModal("ask-question", { questionId: button.dataset.questionId }); break;
@@ -327,6 +344,14 @@ class HideLineApp {
     if (action === "deduction-filter") await this.updateDeductionPreference("filter", event.target.value);
     if (action === "deduction-show-eliminated") await this.updateDeductionPreference("showEliminated", event.target.checked);
     if (action === "deduction-show-zones") await this.updateDeductionPreference("showZones", event.target.checked);
+    if (action === "deduction-show-area-mask") await this.updateDeductionPreference("showAreaMask", event.target.checked);
+    if (action === "deduction-area-constraint") await this.updateDeductionPreference("areaConstraintId", event.target.value || "latest");
+    if (action === "deduction-endgame-station") {
+      await this.updateDeductionPreference("endgameStationId", event.target.value || null);
+      if (event.target.value) this.store.patch("ui.deductionSelectedStationId", event.target.value);
+    }
+    if (action === "deduction-mask-scope") await this.updateDeductionPreference("maskScope", event.target.value === "selected" ? "selected" : "all");
+    if (action === "deduction-area-shape") this.toggleDeductionShapeFields(event.target.closest("form"), event.target.value);
     if (action === "deduction-enable-question") {
       const details = event.target.closest(".deduction-question-fields");
       details?.querySelectorAll(".deduction-auto-fields input, .deduction-auto-fields select, .deduction-auto-fields button").forEach((control) => { control.disabled = !event.target.checked; });
@@ -365,6 +390,7 @@ class HideLineApp {
         case "add-trap": await this.addTrap(data); break;
         case "ask-question": await this.askQuestion(form.dataset.questionId, data, form); break;
         case "deduction-constraint": await this.addDeductionConstraint(form, data); break;
+        case "spatial-data-import": await this.importSpatialData(form); break;
         case "custom-answer": await this.answerQuestion(form.dataset.questionInstance, data.answer, data.note); break;
         case "photo-answer": await this.answerPhoto(form, data); break;
         case "mark-found": await this.markFound(data); break;
@@ -527,6 +553,7 @@ class HideLineApp {
         handLimit: DEFAULT_DURATIONS.handLimit,
         privateNotes: "",
         deductionByRound: {},
+        spatialData: { version: 1, sourceName: "No map data imported", importedAt: null, features: [] },
         ...teamState
       };
       draft.connection.mode = "connected";
@@ -1059,6 +1086,111 @@ class HideLineApp {
     await this.mutateDeduction((roundState) => { roundState[key] = value; }, { history: false });
   }
 
+  async showDeductionConstraint(id) {
+    if (!id) return;
+    await this.mutateDeduction((roundState) => {
+      roundState.mapDisplayMode = DEDUCTION_MAP_MODES.ANSWER;
+      roundState.areaConstraintId = id;
+      roundState.showAreaMask = true;
+    }, { history: false });
+  }
+
+  async inspectDeductionStation(id, constraintId, mode) {
+    if (!STATION_BY_ID.has(id)) throw new Error("Station not found.");
+    this.store.patch("ui.deductionSelectedStationId", id);
+    await this.mutateDeduction((roundState) => {
+      roundState.showAreaMask = true;
+      roundState.maskScope = "selected";
+      if (mode === DEDUCTION_MAP_MODES.ENDGAME) {
+        roundState.mapDisplayMode = DEDUCTION_MAP_MODES.ENDGAME;
+        roundState.endgameStationId = id;
+      } else {
+        roundState.mapDisplayMode = DEDUCTION_MAP_MODES.ANSWER;
+        if (constraintId) roundState.areaConstraintId = constraintId;
+      }
+    }, { history: false });
+  }
+
+  toggleDeductionShapeFields(form, shape) {
+    if (!form) return;
+    form.querySelectorAll("[data-shape-fields]").forEach((section) => {
+      section.hidden = section.dataset.shapeFields !== shape;
+      section.querySelectorAll("input, textarea, select, button").forEach((control) => {
+        if (control.dataset.action === "deduction-area-shape") return;
+        control.disabled = section.hidden;
+      });
+    });
+  }
+
+  startDeductionVertexPick(button) {
+    const form = button.closest("form");
+    const textarea = form?.querySelector('[name="polygonPoints"]');
+    if (!form || !textarea) throw new Error("Open the manual polygon tool first.");
+    beginDeductionMapPick("polygon", ({ lat, lng }) => {
+      if (!form.isConnected) return;
+      const line = `${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`;
+      textarea.value = `${textarea.value.trim()}${textarea.value.trim() ? "\n" : ""}${line}`;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      this.toast("Polygon vertex added. Add at least three in boundary order.", "success");
+    });
+    this.toast("Tap the next polygon corner on the map.", "warning");
+  }
+
+  clearDeductionVertices(button) {
+    const textarea = button.closest("form")?.querySelector('[name="polygonPoints"]');
+    if (!textarea) return;
+    textarea.value = "";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  parseDeductionPolygon(value) {
+    const points = String(value || "")
+      .split(/\r?\n|;/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [latValue, lngValue] = line.split(/[\s,]+/).filter(Boolean);
+        return { lat: Number(latValue), lng: Number(lngValue) };
+      });
+    if (points.length < 3) throw new Error("Add at least three latitude,longitude vertices for the manual polygon.");
+    if (points.some((point) => !Number.isFinite(point.lat) || point.lat < -90 || point.lat > 90 || !Number.isFinite(point.lng) || point.lng < -180 || point.lng > 180)) {
+      throw new Error("Every polygon vertex must be a valid latitude,longitude pair.");
+    }
+    return points;
+  }
+
+  async saveSpatialData(spatialData, successMessage) {
+    const normalised = normaliseSpatialData(spatialData);
+    this.store.patch("privateTeamState.spatialData", normalised);
+    await this.savePrivateTeamState();
+    this.toast(successMessage || `${normalised.features.length} map features imported.`, "success");
+  }
+
+  async importSpatialData(form) {
+    const input = form.querySelector('input[type="file"][name="spatialDataFile"]');
+    const file = input?.files?.[0];
+    if (!file) throw new Error("Choose a KML, KMZ or GeoJSON file first.");
+    const spatialData = await parseSpatialDataFile(file);
+    await this.saveSpatialData(spatialData, `${spatialData.features.length} authoritative map features imported from ${file.name}.`);
+    form.reset();
+  }
+
+  async loadConfiguredSpatialData(button) {
+    if (button) button.disabled = true;
+    try {
+      this.toast("Downloading the configured public Google My Map…", "");
+      const spatialData = await fetchConfiguredSpatialData();
+      await this.saveSpatialData(spatialData, `${spatialData.features.length} features loaded from the configured Google My Map.`);
+    } finally {
+      if (button?.isConnected) button.disabled = false;
+    }
+  }
+
+  async clearSpatialData() {
+    if (!window.confirm("Clear the imported KML/KMZ geometry from this seeker team's private state? Linked questions will remain in the audit trail.")) return;
+    await this.saveSpatialData({ version: 1, sourceName: "No map data imported", importedAt: null, features: [] }, "Imported map data cleared.");
+  }
+
   deductionPoint(data, prefix, label) {
     const lat = Number(data[`${prefix}Lat`]);
     const lng = Number(data[`${prefix}Lng`]);
@@ -1077,6 +1209,7 @@ class HideLineApp {
       label: String(data.label || "").trim(),
       createdAt: toIso(),
       movementMode: data.movementMode === DEDUCTION_MOVEMENT.LOCKED ? DEDUCTION_MOVEMENT.LOCKED : DEDUCTION_MOVEMENT.MOBILE,
+      linkedQuestionInstanceId: String(data.linkedQuestionInstanceId || "") || null,
       enabled: true
     };
     let constraint;
@@ -1126,10 +1259,74 @@ class HideLineApp {
         seekerSide: ["north", "south", "both"].includes(data.seekerSide) ? data.seekerSide : "north",
         answer: data.answer === "no" ? "no" : "yes"
       };
+    } else if (type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH) {
+      constraint = {
+        ...base,
+        seeker: this.deductionPoint(data, "seeker", "the seeker pin"),
+        category: String(data.category || ""),
+        answer: data.answer === "no" ? "no" : "yes"
+      };
+      if (!constraint.category) throw new Error("Choose the imported feature layer to match.");
+    } else if (type === DEDUCTION_TOOL_TYPES.REGION_MATCH) {
+      constraint = {
+        ...base,
+        seeker: this.deductionPoint(data, "seeker", "the seeker pin"),
+        category: String(data.category || ""),
+        answer: data.answer === "no" ? "no" : "yes"
+      };
+      if (!constraint.category) throw new Error("Choose the administrative boundary layer.");
+    } else if (type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE) {
+      constraint = {
+        ...base,
+        seeker: this.deductionPoint(data, "seeker", "the seeker pin"),
+        category: String(data.category || ""),
+        boundaryOnly: data.boundaryOnly === "on",
+        answer: data.answer === "further" ? "further" : "closer"
+      };
+      if (!constraint.category) throw new Error("Choose the imported feature layer to measure.");
+    } else if (type === DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE) {
+      constraint = {
+        ...base,
+        seeker: this.deductionPoint(data, "seeker", "the seeker pin"),
+        answer: data.answer === "further" ? "further" : "closer"
+      };
+    } else if (type === DEDUCTION_TOOL_TYPES.TENTACLE) {
+      const answerFeatureName = String(data.answerFeatureName || "").trim();
+      if (!answerFeatureName) throw new Error("Enter the POI name returned by the hider.");
+      constraint = {
+        ...base,
+        seeker: this.deductionPoint(data, "seeker", "the seeker pin"),
+        category: String(data.category || "museum"),
+        radiusMetres: 2000,
+        answerFeatureName,
+        answer: answerFeatureName
+      };
+    } else if (type === DEDUCTION_TOOL_TYPES.MANUAL_AREA) {
+      const shape = data.shape === "circle" ? "circle" : "polygon";
+      constraint = {
+        ...base,
+        shape,
+        answer: data.answer === "outside" ? "outside" : "inside"
+      };
+      if (shape === "circle") {
+        const radiusMetres = Number(data.radiusMetres);
+        if (!Number.isFinite(radiusMetres) || radiusMetres <= 0) throw new Error("Enter a valid manual-circle radius.");
+        constraint.centre = this.deductionPoint(data, "centre", "the manual circle centre");
+        constraint.radiusMetres = radiusMetres;
+      } else {
+        constraint.polygon = this.parseDeductionPolygon(data.polygonPoints);
+      }
     } else {
       throw new Error("This deduction tool is not supported.");
     }
-    await this.mutateDeduction((roundState) => { roundState.constraints.push(constraint); });
+    await this.mutateDeduction((roundState) => {
+      roundState.constraints.push(constraint);
+      if (constraint.type !== DEDUCTION_TOOL_TYPES.STATION_NAME && constraint.type !== DEDUCTION_TOOL_TYPES.TRANSIT) {
+        roundState.areaConstraintId = constraint.id;
+        roundState.mapDisplayMode = constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED ? DEDUCTION_MAP_MODES.ENDGAME : DEDUCTION_MAP_MODES.ANSWER;
+        roundState.showAreaMask = true;
+      }
+    });
     this.toast("Deduction applied to the private seeker map.", "success");
   }
 
@@ -1233,9 +1430,19 @@ class HideLineApp {
 
   questionDeductionInput(question, data, form, state) {
     if (!question || data.deductionEnabled !== "on") return null;
+    const config = questionDeductionConfig(question);
     const movementMode = data.deductionMovementMode === DEDUCTION_MOVEMENT.LOCKED || state.game?.phase === PHASES.ENDGAME
       ? DEDUCTION_MOVEMENT.LOCKED
       : DEDUCTION_MOVEMENT.MOBILE;
+
+    if (config.mode === "guided") {
+      return {
+        enabled: true,
+        type: DEDUCTION_TOOL_TYPES.MANUAL_REVIEW,
+        movementMode,
+        reviewReason: config.reason || "This answer needs seeker judgement before it can become an area mask."
+      };
+    }
     if (question.category === "radar") {
       const fixedRadius = {
         "radar-0-5": 500,
@@ -1296,7 +1503,28 @@ class HideLineApp {
         seekerSide: data.deductionSeekerSide
       };
     }
-    return null;
+
+    const seeker = config.requiresSeekerPoint
+      ? this.deductionPoint(data, "deductionSeeker", "the seeker pin")
+      : null;
+    if ([DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH, DEDUCTION_TOOL_TYPES.REGION_MATCH].includes(config.type)) {
+      return { enabled: true, type: config.type, movementMode, seeker, category: config.category };
+    }
+    if (config.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE) {
+      return { enabled: true, type: config.type, movementMode, seeker, category: config.category, boundaryOnly: Boolean(config.boundaryOnly) };
+    }
+    if (config.type === DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE) {
+      return { enabled: true, type: config.type, movementMode, seeker };
+    }
+    if (config.type === DEDUCTION_TOOL_TYPES.TENTACLE) {
+      return { enabled: true, type: config.type, movementMode, seeker, category: config.category, radiusMetres: 2000 };
+    }
+    return {
+      enabled: true,
+      type: DEDUCTION_TOOL_TYPES.MANUAL_REVIEW,
+      movementMode,
+      reviewReason: "This answer is linked to the audit trail and can be converted to a manual area after review."
+    };
   }
 
   randomStation() {
@@ -1474,7 +1702,17 @@ class HideLineApp {
       draft.questions = [];
       draft.events = [];
       draft.positions = [];
-      draft.privateTeamState = { stationId: null, stationName: null, stationCoords: null, hidingSpotNote: "", cards: [], handLimit: 6, privateNotes: "", deductionByRound: {} };
+      draft.privateTeamState = {
+        stationId: null,
+        stationName: null,
+        stationCoords: null,
+        hidingSpotNote: "",
+        cards: [],
+        handLimit: 6,
+        privateNotes: "",
+        deductionByRound: {},
+        spatialData: { version: 1, sourceName: "No map data imported", importedAt: null, features: [] }
+      };
       draft.connection.mode = "local";
       draft.connection.status = "offline";
       draft.connection.gameId = null;

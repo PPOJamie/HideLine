@@ -4,6 +4,8 @@ import { QUESTION_BY_ID, repeatedReward } from "../data/questions.js";
 import { CARD_TYPES } from "../data/rules.js";
 import { STATIONS, STATION_BY_ID } from "../data/stations.js";
 import { RAIL_LINES } from "../data/station-geo.js";
+import { questionDeductionConfig, questionDeductionKind } from "../data/question-deduction.js";
+import { spatialCategoryLabel } from "../core/spatial.js";
 import { icon } from "./icons.js";
 
 function frame(title, subtitle, body, actions = "") {
@@ -209,8 +211,17 @@ function deductionLineOptions() {
 
 function questionDeductionFields(state, question) {
   const current = state.location?.current || null;
+  const config = questionDeductionConfig(question);
+  const importedFeatures = state.privateTeamState?.spatialData?.features || [];
+  const categoryCount = config.category ? importedFeatures.filter((feature) => feature.category === config.category).length : 0;
   let fields = "";
-  if (question.category === "radar") {
+  let badge = config.mode === "automatic" ? "Automatic area" : "Guided map review";
+
+  if (config.mode === "guided") {
+    fields = `
+      <div class="callout warning">${icon("info")}<p><strong>Linked, not guessed.</strong>${escapeHtml(config.reason || "This answer needs seeker judgement.")} The answer will appear in the Deduction Map audit trail, where you can link a manual circle or polygon without using banned AI or reverse-image tools.</p></div>
+      ${deductionMovementSelect(state)}`;
+  } else if (question.category === "radar") {
     fields = `${deductionCoordinateFields("deductionCentre", "Seeker radar pin", current)}${deductionMovementSelect(state)}`;
   } else if (question.category === "thermometer") {
     fields = `${deductionCoordinateFields("deductionStart", "Position before travelling")}${deductionCoordinateFields("deductionEnd", "Position after travelling", current)}${deductionMovementSelect(state)}`;
@@ -220,13 +231,20 @@ function questionDeductionFields(state, question) {
     fields = `<div class="field"><label for="deduction-line">Line / operator preset</label><select id="deduction-line" name="deductionLineId">${deductionLineOptions()}</select></div><div class="field"><label for="deduction-stops">Exact stops in the game area (recommended when branches differ)</label><select id="deduction-stops" name="deductionStationIds" multiple size="7">${STATIONS.map((station) => `<option value="${station.id}">${escapeHtml(station.name)}${station.note ? ` — ${escapeHtml(station.note)}` : ""}</option>`).join("")}</select><span class="field-hint">Exact stops override the preset and make the filter match the particular train you are riding.</span></div>`;
   } else if (question.id === "matching-landmass") {
     fields = `<div class="field"><label for="deduction-thames-side">Seeker position</label><select id="deduction-thames-side" name="deductionSeekerSide"><option value="north">North of the Thames</option><option value="south">South of the Thames</option><option value="both">On a bridge / in a tunnel</option></select></div>${deductionMovementSelect(state)}`;
+  } else if (config.requiresSeekerPoint) {
+    const dataMessage = config.category
+      ? `<div class="callout ${categoryCount ? "" : "warning"}">${icon(categoryCount ? "check" : "info")}<p><strong>${categoryCount ? `${categoryCount} imported features ready.` : "Map layer needed."}</strong>${categoryCount ? `HideLine will use the imported ${escapeHtml(spatialCategoryLabel(config.category).toLowerCase())} layer.` : `The answer is still linked now, but it will remain unresolved until the authoritative ${escapeHtml(config.dataLabel || spatialCategoryLabel(config.category).toLowerCase())} layer is imported on the Deduction Map.`}</p></div>`
+      : "";
+    fields = `${deductionCoordinateFields("deductionSeeker", "Seeker pin used for this question", current)}${deductionMovementSelect(state)}${dataMessage}`;
+  } else {
+    fields = `${deductionMovementSelect(state)}`;
   }
-  if (!fields) return "";
+
   return `
     <details class="deduction-question-fields" open>
-      <summary><span>${icon("filter")} Add this answer to the Deduction Map</span><span class="badge badge-mint">Map-ready</span></summary>
+      <summary><span>${icon("filter")} Link this answer to the Deduction Map</span><span class="badge ${config.mode === "automatic" ? "badge-mint" : "badge-yellow"}">${escapeHtml(badge)}</span></summary>
       <div class="stack deduction-question-body">
-        <label class="checkbox-row"><input type="checkbox" name="deductionEnabled" data-action="deduction-enable-question" checked /><span><strong>Automatically apply the answer after it is submitted</strong><br><span class="field-hint">The answer stays shared; the resulting eliminated-station map remains private to the seeker team.</span></span></label>
+        <label class="checkbox-row"><input type="checkbox" name="deductionEnabled" data-action="deduction-enable-question" checked /><span><strong>Record this as a map-linked answer</strong><br><span class="field-hint">Shared question details remain visible to both teams. Eliminations, imported map data and seeker annotations remain private to the seeker team.</span></span></label>
         <div class="deduction-auto-fields stack">${fields}</div>
       </div>
     </details>`;

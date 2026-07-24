@@ -1,5 +1,14 @@
 import { DEFAULT_DURATIONS } from "./constants.js";
 import { haversineMetres } from "./geo.js";
+import {
+  containingFeature,
+  featureDistanceMetres,
+  featuresForCategory,
+  nearestFeature,
+  pointInManualArea,
+  resolveFeatureAnswer,
+  spatialCategoryLabel
+} from "./spatial.js";
 import { stationNameLength } from "../data/stations.js";
 import { STATION_GEO, STATION_GEO_BY_ID, RAIL_LINE_BY_ID, stationsForLine } from "../data/station-geo.js";
 
@@ -15,14 +24,45 @@ export const DEDUCTION_MOVEMENT = Object.freeze({
   LOCKED: "locked"
 });
 
+export const DEDUCTION_MAP_MODES = Object.freeze({
+  OVERVIEW: "overview",
+  ANSWER: "answer",
+  ENDGAME: "endgame"
+});
+
 export const DEDUCTION_TOOL_TYPES = Object.freeze({
   RADAR: "radar",
   THERMOMETER: "thermometer",
   DISTANCE: "distance",
   STATION_NAME: "station-name-length",
   TRANSIT: "transit-line",
-  THAMES: "thames-side"
+  THAMES: "thames-side",
+  NEAREST_FEATURE_MATCH: "nearest-feature-match",
+  REGION_MATCH: "region-match",
+  NEAREST_FEATURE_DISTANCE: "nearest-feature-distance",
+  NEAREST_STATION_DISTANCE: "nearest-station-distance",
+  TENTACLE: "tentacle",
+  MANUAL_AREA: "manual-area",
+  MANUAL_REVIEW: "manual-review"
 });
+
+const STATION_LEVEL_TYPES = new Set([
+  DEDUCTION_TOOL_TYPES.STATION_NAME,
+  DEDUCTION_TOOL_TYPES.TRANSIT
+]);
+
+const AREA_TYPES = new Set([
+  DEDUCTION_TOOL_TYPES.RADAR,
+  DEDUCTION_TOOL_TYPES.THERMOMETER,
+  DEDUCTION_TOOL_TYPES.DISTANCE,
+  DEDUCTION_TOOL_TYPES.THAMES,
+  DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH,
+  DEDUCTION_TOOL_TYPES.REGION_MATCH,
+  DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE,
+  DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE,
+  DEDUCTION_TOOL_TYPES.TENTACLE,
+  DEDUCTION_TOOL_TYPES.MANUAL_AREA
+]);
 
 export const THAMES_CENTRELINE = Object.freeze([
   { lat: 51.4874, lng: -0.2100 },
@@ -45,7 +85,12 @@ export function createDeductionRoundState() {
     stationOverrides: {},
     ignoredAutoConstraintIds: [],
     showEliminated: true,
-    showZones: false,
+    showZones: true,
+    showAreaMask: true,
+    mapDisplayMode: DEDUCTION_MAP_MODES.OVERVIEW,
+    areaConstraintId: "latest",
+    endgameStationId: null,
+    maskScope: "all",
     filter: "remaining",
     undoStack: []
   };
@@ -62,6 +107,7 @@ export function normaliseDeductionRoundState(value = {}) {
   };
 }
 
+/** 97 sample points, retained for fast station-level viability calculations. */
 export function sampleZonePoints(station, radiusMetres = DEFAULT_DURATIONS.hidingZoneRadiusMetres) {
   const lat = Number(station?.lat);
   const lng = Number(station?.lng);
@@ -83,6 +129,44 @@ export function sampleZonePoints(station, radiusMetres = DEFAULT_DURATIONS.hidin
     }
   }
   return points;
+}
+
+/**
+ * Square cells used only for visual masks. The map renderer clips them to the
+ * station's 500 m circle, so grey cells never cover the area outside the zone.
+ */
+export function sampleZoneCells(station, radiusMetres = DEFAULT_DURATIONS.hidingZoneRadiusMetres, cellSizeMetres = 75) {
+  const lat = Number(station?.lat);
+  const lng = Number(station?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+  const metresPerDegreeLat = 111_320;
+  const metresPerDegreeLng = metresPerDegreeLat * Math.cos((lat * Math.PI) / 180);
+  const half = cellSizeMetres / 2;
+  const cells = [];
+  const start = -radiusMetres + half;
+  const end = radiusMetres - half;
+  for (let north = start; north <= end + 0.001; north += cellSizeMetres) {
+    for (let east = start; east <= end + 0.001; east += cellSizeMetres) {
+      // Include every square that can touch the circular zone. The renderer
+      // clips the cells to the exact 500 m circle, so this avoids uncovered
+      // wedges around the circumference without drawing outside the zone.
+      if (Math.hypot(east, north) > radiusMetres + half * Math.SQRT2) continue;
+      const toPoint = (eastMetres, northMetres) => ({
+        lat: lat + northMetres / metresPerDegreeLat,
+        lng: lng + eastMetres / metresPerDegreeLng
+      });
+      cells.push({
+        centre: toPoint(east, north),
+        corners: [
+          toPoint(east - half, north - half),
+          toPoint(east + half, north - half),
+          toPoint(east + half, north + half),
+          toPoint(east - half, north + half)
+        ]
+      });
+    }
+  }
+  return cells;
 }
 
 function finitePoint(value) {
@@ -154,46 +238,196 @@ export function thamesSide(point, toleranceMetres = 35) {
   return nearest.cross >= 0 ? "north" : "south";
 }
 
-function pointPass(constraint, point) {
+function nearestStationDistance(point) {
+  let distance = Infinity;
+  for (const station of STATION_GEO) distance = Math.min(distance, haversineMetres(point, station));
+  return distance;
+}
+
+function prepareConstraint(constraint, context = {}) {
+  const spatialFeatures = context.spatialFeatures || [];
+  const runtime = { constraint, ready: true, manual: false, reason: "", features: [] };
   const answer = canonicalAnswer(constraint.answer);
+
+  if (constraint.type === DEDUCTION_TOOL_TYPES.MANUAL_REVIEW) {
+    return { ...runtime, ready: false, manual: true, reason: constraint.reviewReason || "Seeker judgement is required before this answer can become an area mask." };
+  }
+  if (STATION_LEVEL_TYPES.has(constraint.type)) return runtime;
   if (constraint.type === DEDUCTION_TOOL_TYPES.RADAR) {
-    const centre = finitePoint(constraint.centre);
-    const radius = Number(constraint.radiusMetres);
-    if (!centre || !Number.isFinite(radius) || radius <= 0) return null;
-    const inside = haversineMetres(point, centre) <= radius;
-    if (answer === "yes" || answer === "inside") return inside;
-    if (answer === "no" || answer === "outside") return !inside;
-    return null;
+    if (!finitePoint(constraint.centre) || !Number.isFinite(Number(constraint.radiusMetres)) || Number(constraint.radiusMetres) <= 0) return { ...runtime, ready: false, reason: "Radar pin or radius is missing." };
+    return runtime;
   }
   if (constraint.type === DEDUCTION_TOOL_TYPES.THERMOMETER) {
-    const start = finitePoint(constraint.start);
-    const end = finitePoint(constraint.end);
-    if (!start || !end) return null;
-    const startDistance = haversineMetres(point, start);
-    const endDistance = haversineMetres(point, end);
-    if (answer === "hotter") return endDistance < startDistance;
-    if (answer === "colder") return endDistance > startDistance;
-    return null;
+    if (!finitePoint(constraint.start) || !finitePoint(constraint.end)) return { ...runtime, ready: false, reason: "Thermometer start or end point is missing." };
+    return runtime;
   }
   if (constraint.type === DEDUCTION_TOOL_TYPES.DISTANCE) {
-    const seeker = finitePoint(constraint.seeker);
-    const target = finitePoint(constraint.target);
-    if (!seeker || !target) return null;
-    const seekerDistance = haversineMetres(seeker, target);
-    const hiderDistance = haversineMetres(point, target);
-    if (answer === "closer") return hiderDistance < seekerDistance;
-    if (answer === "further") return hiderDistance > seekerDistance;
-    return null;
+    if (!finitePoint(constraint.seeker) || !finitePoint(constraint.target)) return { ...runtime, ready: false, reason: "Seeker or reference pin is missing." };
+    return runtime;
   }
   if (constraint.type === DEDUCTION_TOOL_TYPES.THAMES) {
-    const seekerSide = constraint.seekerSide || "unknown";
+    if (!["north", "south", "both"].includes(constraint.seekerSide)) return { ...runtime, ready: false, reason: "The seeker's Thames side is missing." };
+    return runtime;
+  }
+  if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE) {
+    if (!finitePoint(constraint.seeker)) return { ...runtime, ready: false, reason: "The seeker's pin is missing." };
+    return runtime;
+  }
+  if (constraint.type === DEDUCTION_TOOL_TYPES.MANUAL_AREA) {
+    const polygonReady = Array.isArray(constraint.polygon) && constraint.polygon.length >= 3;
+    const circleReady = constraint.shape === "circle" && finitePoint(constraint.centre) && Number(constraint.radiusMetres) > 0;
+    return polygonReady || circleReady ? runtime : { ...runtime, ready: false, reason: "The manual area has no valid polygon or circle." };
+  }
+
+  if ([
+    DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH,
+    DEDUCTION_TOOL_TYPES.REGION_MATCH,
+    DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE,
+    DEDUCTION_TOOL_TYPES.TENTACLE
+  ].includes(constraint.type)) {
+    const features = featuresForCategory(spatialFeatures, constraint.category);
+    if (!features.length) {
+      return {
+        ...runtime,
+        ready: false,
+        reason: `Import the authoritative ${spatialCategoryLabel(constraint.category).toLowerCase()} layer to calculate this answer.`
+      };
+    }
+    runtime.features = features;
+  }
+
+  if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH) {
+    const seeker = finitePoint(constraint.seeker);
+    if (!seeker) return { ...runtime, ready: false, reason: "The seeker's pin is missing." };
+    const reference = constraint.referenceFeatureId
+      ? runtime.features.find((feature) => feature.id === constraint.referenceFeatureId)
+      : nearestFeature(seeker, runtime.features)?.feature;
+    if (!reference) return { ...runtime, ready: false, reason: `The seeker's nearest ${spatialCategoryLabel(constraint.category).toLowerCase()} could not be resolved.` };
+    runtime.referenceFeature = reference;
+    return runtime;
+  }
+
+  if (constraint.type === DEDUCTION_TOOL_TYPES.REGION_MATCH) {
+    const seeker = finitePoint(constraint.seeker);
+    if (!seeker) return { ...runtime, ready: false, reason: "The seeker's pin is missing." };
+    const reference = constraint.referenceFeatureId
+      ? runtime.features.find((feature) => feature.id === constraint.referenceFeatureId)
+      : containingFeature(seeker, runtime.features);
+    if (!reference) return { ...runtime, ready: false, reason: `The seeker's ${spatialCategoryLabel(constraint.category).toLowerCase()} could not be resolved from the imported polygons.` };
+    runtime.referenceFeature = reference;
+    return runtime;
+  }
+
+  if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE) {
+    const seeker = finitePoint(constraint.seeker);
+    if (!seeker) return { ...runtime, ready: false, reason: "The seeker's pin is missing." };
+    const nearest = nearestFeature(seeker, runtime.features, { boundaryOnly: Boolean(constraint.boundaryOnly) });
+    if (!nearest || !Number.isFinite(nearest.distanceMetres)) return { ...runtime, ready: false, reason: `The reference distance to ${spatialCategoryLabel(constraint.category).toLowerCase()} could not be calculated.` };
+    runtime.seekerDistanceMetres = nearest.distanceMetres;
+    runtime.referenceFeature = nearest.feature;
+    return runtime;
+  }
+
+  if (constraint.type === DEDUCTION_TOOL_TYPES.TENTACLE) {
+    const seeker = finitePoint(constraint.seeker);
+    if (!seeker) return { ...runtime, ready: false, reason: "The seeker's pin is missing." };
+    const radiusMetres = Number(constraint.radiusMetres) || 2000;
+    runtime.validFeatures = runtime.features.filter((feature) => featureDistanceMetres(seeker, feature) <= radiusMetres);
+    if (!runtime.validFeatures.length) return { ...runtime, ready: false, reason: `No imported ${spatialCategoryLabel(constraint.category).toLowerCase()} lie within ${Math.round(radiusMetres / 100) / 10} km of the seeker pin.` };
+    runtime.answerFeature = constraint.answerFeatureId
+      ? runtime.validFeatures.find((feature) => feature.id === constraint.answerFeatureId)
+      : resolveFeatureAnswer(constraint.answerFeatureName || constraint.answer, runtime.validFeatures);
+    if (!runtime.answerFeature) return { ...runtime, ready: false, reason: `The answer “${constraint.answerFeatureName || constraint.answer || ""}” does not match a valid imported POI within 2 km of the seeker pin.` };
+    return runtime;
+  }
+
+  if (!AREA_TYPES.has(constraint.type)) return { ...runtime, ready: false, reason: "This deduction type is not supported by the area engine." };
+  if (["n/a", "na"].includes(answer)) return { ...runtime, ready: false, manual: true, reason: "An N/A answer does not create a geographical elimination." };
+  return runtime;
+}
+
+function pointPassRuntime(runtime, point) {
+  const constraint = runtime.constraint;
+  const answer = canonicalAnswer(constraint.answer);
+  if (!runtime.ready) return null;
+
+  if (constraint.type === DEDUCTION_TOOL_TYPES.RADAR) {
+    const inside = haversineMetres(point, constraint.centre) <= Number(constraint.radiusMetres);
+    if (answer === "yes" || answer === "inside") return inside;
+    if (answer === "no" || answer === "outside") return !inside;
+  }
+  if (constraint.type === DEDUCTION_TOOL_TYPES.THERMOMETER) {
+    const startDistance = haversineMetres(point, constraint.start);
+    const endDistance = haversineMetres(point, constraint.end);
+    if (answer === "hotter") return endDistance < startDistance;
+    if (answer === "colder") return endDistance > startDistance;
+  }
+  if (constraint.type === DEDUCTION_TOOL_TYPES.DISTANCE) {
+    const seekerDistance = haversineMetres(constraint.seeker, constraint.target);
+    const hiderDistance = haversineMetres(point, constraint.target);
+    if (answer === "closer") return hiderDistance < seekerDistance;
+    if (answer === "further") return hiderDistance > seekerDistance;
+  }
+  if (constraint.type === DEDUCTION_TOOL_TYPES.THAMES) {
     const hiderSide = thamesSide(point);
-    const same = seekerSide === "both" || hiderSide === "both" || seekerSide === hiderSide;
+    const same = constraint.seekerSide === "both" || hiderSide === "both" || constraint.seekerSide === hiderSide;
     if (answer === "yes" || answer === "same") return same;
     if (answer === "no" || answer === "different") return !same;
-    return null;
+  }
+  if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH) {
+    const candidate = nearestFeature(point, runtime.features)?.feature;
+    if (!candidate) return null;
+    const same = candidate.id === runtime.referenceFeature.id;
+    if (answer === "yes" || answer === "same") return same;
+    if (answer === "no" || answer === "different") return !same;
+  }
+  if (constraint.type === DEDUCTION_TOOL_TYPES.REGION_MATCH) {
+    const candidate = containingFeature(point, runtime.features);
+    if (!candidate) return null;
+    const same = candidate.id === runtime.referenceFeature.id;
+    if (answer === "yes" || answer === "same") return same;
+    if (answer === "no" || answer === "different") return !same;
+  }
+  if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE) {
+    const candidate = nearestFeature(point, runtime.features, { boundaryOnly: Boolean(constraint.boundaryOnly) });
+    if (!candidate) return null;
+    if (answer === "closer") return candidate.distanceMetres < runtime.seekerDistanceMetres;
+    if (answer === "further") return candidate.distanceMetres > runtime.seekerDistanceMetres;
+  }
+  if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE) {
+    const seekerDistance = nearestStationDistance(constraint.seeker);
+    const candidateDistance = nearestStationDistance(point);
+    if (answer === "closer") return candidateDistance < seekerDistance;
+    if (answer === "further") return candidateDistance > seekerDistance;
+  }
+  if (constraint.type === DEDUCTION_TOOL_TYPES.TENTACLE) {
+    const candidate = nearestFeature(point, runtime.validFeatures)?.feature;
+    return candidate ? candidate.id === runtime.answerFeature.id : null;
+  }
+  if (constraint.type === DEDUCTION_TOOL_TYPES.MANUAL_AREA) {
+    const inside = pointInManualArea(point, constraint);
+    return answer === "outside" || answer === "exclude" ? !inside : inside;
   }
   return null;
+}
+
+export function evaluateConstraintAtPoint(constraint, point, context = {}) {
+  return pointPassRuntime(prepareConstraint(constraint, context), point);
+}
+
+export function constraintResolution(constraint, context = {}) {
+  const runtime = prepareConstraint(constraint, context);
+  return {
+    ready: runtime.ready,
+    manual: runtime.manual,
+    reason: runtime.reason,
+    featureCount: runtime.features?.length || 0,
+    referenceFeature: runtime.referenceFeature || runtime.answerFeature || null
+  };
+}
+
+export function isAreaConstraint(constraint) {
+  return AREA_TYPES.has(constraint?.type);
 }
 
 export function constraintTitle(constraint) {
@@ -204,6 +438,13 @@ export function constraintTitle(constraint) {
   if (constraint.type === DEDUCTION_TOOL_TYPES.STATION_NAME) return `Station name length · ${titleCase(constraint.answer)}`;
   if (constraint.type === DEDUCTION_TOOL_TYPES.TRANSIT) return `Transit line · ${titleCase(constraint.answer)}`;
   if (constraint.type === DEDUCTION_TOOL_TYPES.THAMES) return `Thames side · ${titleCase(constraint.answer)}`;
+  if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH) return `Nearest ${spatialCategoryLabel(constraint.category).toLowerCase()} match · ${titleCase(constraint.answer)}`;
+  if (constraint.type === DEDUCTION_TOOL_TYPES.REGION_MATCH) return `${spatialCategoryLabel(constraint.category)} match · ${titleCase(constraint.answer)}`;
+  if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE) return `Nearest ${spatialCategoryLabel(constraint.category).toLowerCase()} distance · ${titleCase(constraint.answer)}`;
+  if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE) return `Nearest hiding-station distance · ${titleCase(constraint.answer)}`;
+  if (constraint.type === DEDUCTION_TOOL_TYPES.TENTACLE) return `${spatialCategoryLabel(constraint.category)} tentacle · ${constraint.answerFeatureName || constraint.answer || "answer"}`;
+  if (constraint.type === DEDUCTION_TOOL_TYPES.MANUAL_AREA) return `Manual ${constraint.shape === "circle" ? "circle" : "polygon"} · ${titleCase(constraint.answer || "inside")}`;
+  if (constraint.type === DEDUCTION_TOOL_TYPES.MANUAL_REVIEW) return constraint.questionName ? `${constraint.questionName} · guided review` : "Guided map review";
   return "Deduction constraint";
 }
 
@@ -222,38 +463,62 @@ function explainConstraint(constraint) {
   return `${constraintTitle(constraint)} (${mode})`;
 }
 
-export function evaluateStationPossibilities({ stations, constraints = [], stationOverrides = {}, radiusMetres = DEFAULT_DURATIONS.hidingZoneRadiusMetres } = {}) {
+export function evaluateStationPossibilities({
+  stations,
+  constraints = [],
+  stationOverrides = {},
+  radiusMetres = DEFAULT_DURATIONS.hidingZoneRadiusMetres,
+  spatialFeatures = []
+} = {}) {
   const sourceStations = stations || [];
+  const context = { spatialFeatures };
+  const runtimes = constraints.map((constraint) => prepareConstraint(constraint, context));
+  const stationRuntimes = runtimes.filter((runtime) => STATION_LEVEL_TYPES.has(runtime.constraint.type));
+  const mobileRuntimes = runtimes.filter((runtime) => !STATION_LEVEL_TYPES.has(runtime.constraint.type) && runtime.constraint.movementMode !== DEDUCTION_MOVEMENT.LOCKED);
+  const lockedRuntimes = runtimes.filter((runtime) => !STATION_LEVEL_TYPES.has(runtime.constraint.type) && runtime.constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED);
+
   return sourceStations.map((station) => {
     const geo = STATION_GEO_BY_ID.get(station.id) || station;
     const samples = sampleZonePoints(geo, radiusMetres);
     const failures = [];
     const partials = [];
+    const partialConstraintIds = [];
     const passes = [];
-    const stationConstraints = constraints.filter((constraint) => [DEDUCTION_TOOL_TYPES.STATION_NAME, DEDUCTION_TOOL_TYPES.TRANSIT].includes(constraint.type));
-    const locationConstraints = constraints.filter((constraint) => !stationConstraints.includes(constraint));
+    const unresolved = [];
 
-    for (const constraint of stationConstraints) {
-      const pass = stationLevelPass(constraint, station, geo);
-      if (pass === false) failures.push(explainConstraint(constraint));
-      else if (pass === true) passes.push(explainConstraint(constraint));
+    for (const runtime of stationRuntimes) {
+      const pass = stationLevelPass(runtime.constraint, station, geo);
+      if (pass === false) failures.push(explainConstraint(runtime.constraint));
+      else if (pass === true) passes.push(explainConstraint(runtime.constraint));
+      else unresolved.push(`${constraintTitle(runtime.constraint)} could not be evaluated`);
     }
 
-    const mobile = locationConstraints.filter((constraint) => constraint.movementMode !== DEDUCTION_MOVEMENT.LOCKED);
-    for (const constraint of mobile) {
-      const mask = samples.map((point) => pointPass(constraint, point));
+    for (const runtime of mobileRuntimes) {
+      if (!runtime.ready) {
+        unresolved.push(`${constraintTitle(runtime.constraint)}: ${runtime.reason}`);
+        continue;
+      }
+      const mask = samples.map((point) => pointPassRuntime(runtime, point));
       const valid = mask.filter((value) => value === true).length;
       const evaluated = mask.filter((value) => value !== null).length;
-      if (evaluated && valid === 0) failures.push(explainConstraint(constraint));
-      else if (valid > 0 && valid < evaluated) partials.push(explainConstraint(constraint));
-      else if (valid === evaluated && evaluated) passes.push(explainConstraint(constraint));
+      if (evaluated && valid === 0) failures.push(explainConstraint(runtime.constraint));
+      else if (valid > 0 && valid < evaluated) {
+        partials.push(explainConstraint(runtime.constraint));
+        partialConstraintIds.push(runtime.constraint.id);
+      }
+      else if (valid === evaluated && evaluated) passes.push(explainConstraint(runtime.constraint));
+      else unresolved.push(`${constraintTitle(runtime.constraint)} produced no evaluable points`);
     }
 
-    const locked = locationConstraints.filter((constraint) => constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED);
-    if (locked.length && samples.length) {
-      const common = samples.filter((point) => locked.every((constraint) => pointPass(constraint, point) === true));
-      if (!common.length) failures.push(`No sampled point satisfies all ${locked.length} endgame-locked constraints together`);
-      else if (common.length < samples.length) partials.push(`${common.length} of ${samples.length} sampled points remain after endgame intersection`);
+    const readyLocked = lockedRuntimes.filter((runtime) => runtime.ready);
+    for (const runtime of lockedRuntimes.filter((item) => !item.ready)) unresolved.push(`${constraintTitle(runtime.constraint)}: ${runtime.reason}`);
+    if (readyLocked.length && samples.length) {
+      const common = samples.filter((point) => readyLocked.every((runtime) => pointPassRuntime(runtime, point) === true));
+      if (!common.length) failures.push(`No sampled point satisfies all ${readyLocked.length} endgame-locked constraints together`);
+      else if (common.length < samples.length) {
+        partials.push(`${common.length} of ${samples.length} sampled points remain after endgame intersection`);
+        partialConstraintIds.push(...readyLocked.map((runtime) => runtime.constraint.id));
+      }
       else passes.push("All sampled points satisfy the endgame-locked constraints");
     }
 
@@ -270,17 +535,82 @@ export function evaluateStationPossibilities({ stations, constraints = [], stati
       priority: Boolean(override.priority),
       failures,
       partials,
+      partialConstraintIds: [...new Set(partialConstraintIds)],
       passes,
+      unresolved,
       override,
       sampleCount: samples.length
     };
   });
 }
 
+/**
+ * Build a cell-by-cell mask for one station. In `constraint` mode only the
+ * selected answer is shown, which is the only truthful way to display a
+ * pre-endgame snapshot. In `endgame` mode all locked answers are intersected.
+ */
+export function evaluateZoneAreaMask({
+  station,
+  constraints = [],
+  mode = "constraint",
+  activeConstraintId = null,
+  spatialFeatures = [],
+  radiusMetres = DEFAULT_DURATIONS.hidingZoneRadiusMetres,
+  cellSizeMetres = 70
+} = {}) {
+  const cells = sampleZoneCells(station, radiusMetres, cellSizeMetres);
+  const context = { spatialFeatures };
+  let selectedConstraints;
+  if (mode === "endgame") {
+    selectedConstraints = constraints.filter((constraint) => constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED && (AREA_TYPES.has(constraint.type) || STATION_LEVEL_TYPES.has(constraint.type)));
+  } else {
+    selectedConstraints = constraints.filter((constraint) => constraint.id === activeConstraintId);
+  }
+  const runtimes = selectedConstraints.map((constraint) => prepareConstraint(constraint, context));
+  const stationRuntimes = runtimes.filter((runtime) => STATION_LEVEL_TYPES.has(runtime.constraint.type));
+  const areaRuntimes = runtimes.filter((runtime) => !STATION_LEVEL_TYPES.has(runtime.constraint.type));
+  const stationGeo = STATION_GEO_BY_ID.get(station?.id) || station;
+  const stationFailed = stationRuntimes.some((runtime) => stationLevelPass(runtime.constraint, station, stationGeo) === false);
+  const unresolved = runtimes.filter((runtime) => !runtime.ready).map((runtime) => `${constraintTitle(runtime.constraint)}: ${runtime.reason}`);
+  const evaluatedCells = cells.map((cell) => {
+    if (stationFailed) return { ...cell, state: "excluded" };
+    if (!areaRuntimes.length) return { ...cell, state: unresolved.length ? "unknown" : "allowed" };
+    const values = areaRuntimes.map((runtime) => pointPassRuntime(runtime, cell.centre));
+    if (values.some((value) => value === false)) return { ...cell, state: "excluded" };
+    if (values.every((value) => value === true)) return { ...cell, state: "allowed" };
+    return { ...cell, state: "unknown" };
+  });
+  const allowed = evaluatedCells.filter((cell) => cell.state === "allowed").length;
+  const excluded = evaluatedCells.filter((cell) => cell.state === "excluded").length;
+  const unknown = evaluatedCells.length - allowed - excluded;
+  const known = allowed + excluded;
+  return {
+    stationId: station?.id,
+    cells: evaluatedCells,
+    allowed,
+    excluded,
+    unknown,
+    total: evaluatedCells.length,
+    allowedFraction: known ? allowed / known : null,
+    unresolved,
+    constraintCount: selectedConstraints.length
+  };
+}
+
 function movementModeFromInput(input, question) {
   if (input?.movementMode === DEDUCTION_MOVEMENT.LOCKED) return DEDUCTION_MOVEMENT.LOCKED;
   if (question?.answeredPhase === "endgame" || question?.phase === "endgame") return DEDUCTION_MOVEMENT.LOCKED;
   return DEDUCTION_MOVEMENT.MOBILE;
+}
+
+function manualReviewConstraint(base, input, question, answer, reason = "") {
+  return {
+    ...base,
+    type: DEDUCTION_TOOL_TYPES.MANUAL_REVIEW,
+    answer,
+    questionName: question.questionName,
+    reviewReason: reason || input.reviewReason || "This answer is linked, but needs a seeker-drawn area or manual station decisions."
+  };
 }
 
 function automaticConstraint(question) {
@@ -296,6 +626,9 @@ function automaticConstraint(question) {
     label: `${question.questionName}: ${question.answer}`
   };
   const answer = canonicalAnswer(question.answer);
+  if (["n/a", "na"].includes(answer)) return manualReviewConstraint(base, input, question, answer, "The N/A answer is retained in the audit trail but does not eliminate an area.");
+  if (input.type === DEDUCTION_TOOL_TYPES.MANUAL_REVIEW) return manualReviewConstraint(base, input, question, answer);
+
   if (input.type === DEDUCTION_TOOL_TYPES.RADAR && ["yes", "no"].includes(answer)) {
     const centre = finitePoint(input.centre);
     const radiusMetres = Number(input.radiusMetres);
@@ -323,7 +656,34 @@ function automaticConstraint(question) {
     if (!["north", "south", "both"].includes(input.seekerSide)) return null;
     return { ...base, type: input.type, seekerSide: input.seekerSide, answer };
   }
-  return null;
+  if ([DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH, DEDUCTION_TOOL_TYPES.REGION_MATCH].includes(input.type) && ["yes", "no"].includes(answer)) {
+    const seeker = finitePoint(input.seeker);
+    if (!seeker || !input.category) return null;
+    return { ...base, type: input.type, seeker, category: input.category, referenceFeatureId: input.referenceFeatureId || null, answer };
+  }
+  if (input.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE && ["closer", "further"].includes(answer)) {
+    const seeker = finitePoint(input.seeker);
+    if (!seeker || !input.category) return null;
+    return { ...base, type: input.type, seeker, category: input.category, boundaryOnly: Boolean(input.boundaryOnly), answer };
+  }
+  if (input.type === DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE && ["closer", "further"].includes(answer)) {
+    const seeker = finitePoint(input.seeker);
+    return seeker ? { ...base, type: input.type, seeker, answer } : null;
+  }
+  if (input.type === DEDUCTION_TOOL_TYPES.TENTACLE) {
+    const seeker = finitePoint(input.seeker);
+    if (!seeker || !input.category || !String(question.answer || "").trim()) return null;
+    return {
+      ...base,
+      type: input.type,
+      seeker,
+      category: input.category,
+      radiusMetres: Number(input.radiusMetres) || 2000,
+      answerFeatureName: String(question.answer).trim(),
+      answer
+    };
+  }
+  return manualReviewConstraint(base, input, question, answer, "The structured answer could not be converted automatically. Use a linked manual area if it supports a fair elimination.");
 }
 
 export function deriveAutomaticConstraints({ questions = [], team, round = 1, ignoredIds = [] } = {}) {
@@ -348,7 +708,7 @@ export function deductionSummary(results = []) {
   return counts;
 }
 
-export function constraintOverlay(constraint) {
+export function constraintOverlay(constraint, context = {}) {
   if (constraint.type === DEDUCTION_TOOL_TYPES.RADAR) return { type: "circle", centre: finitePoint(constraint.centre), radiusMetres: Number(constraint.radiusMetres), answer: constraint.answer, label: constraintTitle(constraint) };
   if (constraint.type === DEDUCTION_TOOL_TYPES.THERMOMETER) return { type: "line", start: finitePoint(constraint.start), end: finitePoint(constraint.end), answer: constraint.answer, label: constraintTitle(constraint) };
   if (constraint.type === DEDUCTION_TOOL_TYPES.DISTANCE) {
@@ -357,6 +717,27 @@ export function constraintOverlay(constraint) {
     return { type: "distance", seeker, target, radiusMetres: seeker && target ? haversineMetres(seeker, target) : null, answer: constraint.answer, label: constraintTitle(constraint) };
   }
   if (constraint.type === DEDUCTION_TOOL_TYPES.THAMES) return { type: "thames", line: THAMES_CENTRELINE, answer: constraint.answer, label: constraintTitle(constraint) };
+  if (constraint.type === DEDUCTION_TOOL_TYPES.MANUAL_AREA) {
+    if (constraint.shape === "circle") return { type: "circle", centre: finitePoint(constraint.centre), radiusMetres: Number(constraint.radiusMetres), answer: constraint.answer, label: constraintTitle(constraint) };
+    if (Array.isArray(constraint.polygon)) return { type: "polygon", points: constraint.polygon, answer: constraint.answer, label: constraintTitle(constraint) };
+  }
+  if ([
+    DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH,
+    DEDUCTION_TOOL_TYPES.REGION_MATCH,
+    DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE,
+    DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE,
+    DEDUCTION_TOOL_TYPES.TENTACLE
+  ].includes(constraint.type)) {
+    const runtime = prepareConstraint(constraint, context);
+    return {
+      type: "reference",
+      seeker: finitePoint(constraint.seeker),
+      referenceFeature: runtime.referenceFeature || runtime.answerFeature || null,
+      answer: constraint.answer,
+      label: constraintTitle(constraint),
+      ready: runtime.ready
+    };
+  }
   return null;
 }
 

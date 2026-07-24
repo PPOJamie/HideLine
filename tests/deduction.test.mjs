@@ -6,10 +6,14 @@ import {
   DEDUCTION_TOOL_TYPES,
   deriveAutomaticConstraints,
   evaluateStationPossibilities,
+  evaluateZoneAreaMask,
+  sampleZoneCells,
   sampleZonePoints,
   thamesSide
 } from "../src/core/deduction.js";
 import { STATION_GEO } from "../src/data/station-geo.js";
+import { QUESTIONS } from "../src/data/questions.js";
+import { QUESTION_DEDUCTION } from "../src/data/question-deduction.js";
 import { STATIONS } from "../src/data/stations.js";
 
 test("every handbook station has an embedded coordinate for the offline deduction map", () => {
@@ -148,4 +152,211 @@ test("an answer recorded during endgame is treated as fixed even when asked earl
 test("the simplified Thames guide distinguishes central north and south points", () => {
   assert.equal(thamesSide({ lat: 51.515, lng: -0.11 }), "north");
   assert.equal(thamesSide({ lat: 51.49, lng: -0.11 }), "south");
+});
+
+
+test("all 55 handbook questions are linked to either automatic geometry or guided review", () => {
+  assert.equal(QUESTIONS.length, 55);
+  assert.equal(Object.keys(QUESTION_DEDUCTION).length, QUESTIONS.length);
+  assert.deepEqual(
+    new Set(Object.keys(QUESTION_DEDUCTION)),
+    new Set(QUESTIONS.map((question) => question.id))
+  );
+  assert.ok(Object.values(QUESTION_DEDUCTION).every((config) => ["automatic", "guided"].includes(config.mode)));
+});
+
+test("visual cells cover the full circular zone after clipping", () => {
+  const station = { id: "cells", name: "Cells", lat: 51.5, lng: -0.1 };
+  const cells = sampleZoneCells(station, 500, 50);
+  assert.ok(cells.length > 300);
+  const furthestCorner = Math.max(...cells.flatMap((cell) => cell.corners.map((corner) => {
+    const north = (corner.lat - station.lat) * 111_320;
+    const east = (corner.lng - station.lng) * 111_320 * Math.cos((station.lat * Math.PI) / 180);
+    return Math.hypot(east, north);
+  })));
+  assert.ok(furthestCorner >= 500, "edge-touching cells should extend past the clip circle");
+});
+
+test("a linked manual polygon greys only the excluded half of a station circle", () => {
+  const station = { id: "manual-mask", name: "Manual mask", lat: 51.5, lng: -0.1 };
+  const constraint = {
+    id: "manual-west",
+    type: DEDUCTION_TOOL_TYPES.MANUAL_AREA,
+    movementMode: DEDUCTION_MOVEMENT.MOBILE,
+    shape: "polygon",
+    answer: "inside",
+    polygon: [
+      { lat: 51.494, lng: -0.108 },
+      { lat: 51.506, lng: -0.108 },
+      { lat: 51.506, lng: -0.1 },
+      { lat: 51.494, lng: -0.1 }
+    ]
+  };
+  const mask = evaluateZoneAreaMask({
+    station,
+    constraints: [constraint],
+    mode: "constraint",
+    activeConstraintId: constraint.id,
+    cellSizeMetres: 40
+  });
+  assert.ok(mask.allowed > 0);
+  assert.ok(mask.excluded > 0);
+  assert.equal(mask.unknown, 0);
+  assert.ok(mask.allowedFraction > 0.35 && mask.allowedFraction < 0.65);
+});
+
+function pointFeature(id, name, category, lat, lng) {
+  return {
+    id,
+    name,
+    category,
+    layer: category,
+    geometry: { type: "Point", coordinates: [lng, lat] },
+    bbox: { west: lng, east: lng, south: lat, north: lat },
+    source: "test",
+    properties: {}
+  };
+}
+
+function polygonFeature(id, name, category, west, south, east, north) {
+  return {
+    id,
+    name,
+    category,
+    layer: category,
+    geometry: {
+      type: "Polygon",
+      coordinates: [[
+        [west, south], [east, south], [east, north], [west, north], [west, south]
+      ]]
+    },
+    bbox: { west, south, east, north },
+    source: "test",
+    properties: {}
+  };
+}
+
+test("nearest-feature matching creates a detailed partial mask", () => {
+  const station = { id: "nearest-match", name: "Nearest match", lat: 51.5, lng: -0.1 };
+  const features = [
+    pointFeature("museum-west", "West Museum", "museum", 51.5, -0.1045),
+    pointFeature("museum-east", "East Museum", "museum", 51.5, -0.0955)
+  ];
+  const constraint = {
+    id: "nearest-match-answer",
+    type: DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH,
+    movementMode: DEDUCTION_MOVEMENT.MOBILE,
+    seeker: { lat: 51.5, lng: -0.105 },
+    category: "museum",
+    answer: "yes"
+  };
+  const mask = evaluateZoneAreaMask({
+    station,
+    constraints: [constraint],
+    mode: "constraint",
+    activeConstraintId: constraint.id,
+    spatialFeatures: features,
+    cellSizeMetres: 35
+  });
+  assert.ok(mask.allowed > 0);
+  assert.ok(mask.excluded > 0);
+  assert.equal(mask.unknown, 0);
+});
+
+test("region matching uses imported boundary polygons", () => {
+  const station = { id: "region-mask", name: "Region mask", lat: 51.5, lng: -0.1 };
+  const features = [
+    polygonFeature("borough-west", "West Borough", "borough", -0.12, 51.48, -0.1, 51.52),
+    polygonFeature("borough-east", "East Borough", "borough", -0.1, 51.48, -0.08, 51.52)
+  ];
+  const constraint = {
+    id: "borough-match",
+    type: DEDUCTION_TOOL_TYPES.REGION_MATCH,
+    movementMode: DEDUCTION_MOVEMENT.MOBILE,
+    seeker: { lat: 51.5, lng: -0.11 },
+    category: "borough",
+    answer: "yes"
+  };
+  const mask = evaluateZoneAreaMask({
+    station,
+    constraints: [constraint],
+    mode: "constraint",
+    activeConstraintId: constraint.id,
+    spatialFeatures: features,
+    cellSizeMetres: 35
+  });
+  assert.ok(mask.allowed > 0);
+  assert.ok(mask.excluded > 0);
+  assert.equal(mask.unknown, 0);
+});
+
+test("Tentacles keeps cells closest to the named valid POI within two kilometres", () => {
+  const station = { id: "tentacle-mask", name: "Tentacle mask", lat: 51.5, lng: -0.1 };
+  const features = [
+    pointFeature("museum-west", "West Museum", "museum", 51.5, -0.1045),
+    pointFeature("museum-east", "East Museum", "museum", 51.5, -0.0955),
+    pointFeature("museum-far", "Far Museum", "museum", 51.5, -0.2)
+  ];
+  const constraint = {
+    id: "tentacle-answer",
+    type: DEDUCTION_TOOL_TYPES.TENTACLE,
+    movementMode: DEDUCTION_MOVEMENT.MOBILE,
+    seeker: { lat: 51.5, lng: -0.1 },
+    category: "museum",
+    radiusMetres: 2000,
+    answerFeatureName: "West Museum",
+    answer: "West Museum"
+  };
+  const mask = evaluateZoneAreaMask({
+    station,
+    constraints: [constraint],
+    mode: "constraint",
+    activeConstraintId: constraint.id,
+    spatialFeatures: features,
+    cellSizeMetres: 35
+  });
+  assert.ok(mask.allowed > 0);
+  assert.ok(mask.excluded > 0);
+  assert.equal(mask.unknown, 0);
+});
+
+test("the Endgame circle intersects all locked answer areas at one fixed point", () => {
+  const station = { id: "endgame-mask", name: "Endgame mask", lat: 51.5, lng: -0.1 };
+  const constraints = [
+    {
+      id: "locked-east",
+      type: DEDUCTION_TOOL_TYPES.RADAR,
+      movementMode: DEDUCTION_MOVEMENT.LOCKED,
+      centre: { lat: 51.5, lng: -0.0965 },
+      radiusMetres: 420,
+      answer: "yes"
+    },
+    {
+      id: "locked-west",
+      type: DEDUCTION_TOOL_TYPES.RADAR,
+      movementMode: DEDUCTION_MOVEMENT.LOCKED,
+      centre: { lat: 51.5, lng: -0.1035 },
+      radiusMetres: 420,
+      answer: "yes"
+    },
+    {
+      id: "mobile-ignored-in-endgame",
+      type: DEDUCTION_TOOL_TYPES.RADAR,
+      movementMode: DEDUCTION_MOVEMENT.MOBILE,
+      centre: { lat: 51.5, lng: -0.1 },
+      radiusMetres: 20,
+      answer: "yes"
+    }
+  ];
+  const mask = evaluateZoneAreaMask({
+    station,
+    constraints,
+    mode: "endgame",
+    cellSizeMetres: 30
+  });
+  assert.equal(mask.constraintCount, 2);
+  assert.ok(mask.allowed > 0);
+  assert.ok(mask.excluded > 0);
+  assert.equal(mask.unknown, 0);
+  assert.ok(mask.allowedFraction < 0.5);
 });

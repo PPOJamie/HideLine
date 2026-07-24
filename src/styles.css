@@ -200,7 +200,7 @@ img { max-width: 100%; }
   margin: 0 auto;
   padding: 28px clamp(18px, 4vw, 44px) 70px;
 }
-.view-stack { display: grid; gap: 22px; }
+.view-stack { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 22px; }
 
 .mobile-nav { display: none; }
 
@@ -952,3 +952,119 @@ select[multiple] option { padding: 7px 8px; border-radius: 7px; }
 .vector-map-badge strong { color: var(--ink-900); font-size: .75rem; }
 .vector-map-badge span { font-size: .65rem; line-height: 1.35; }
 .map-pick-active .deduction-vector-map { cursor: crosshair; }
+
+/* Deduction map v1.2: exact answer-area masks, spatial layers and Endgame view */
+.segmented-control {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 4px;
+  gap: 4px;
+  border: 1px solid var(--ink-200);
+  border-radius: 14px;
+  background: var(--ink-50);
+}
+.segmented-control button {
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--ink-600);
+  background: transparent;
+  font: inherit;
+  font-size: .76rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.segmented-control button:hover { color: var(--ink-900); background: white; }
+.segmented-control button.active { color: white; background: var(--ink-900); box-shadow: var(--shadow-sm); }
+.deduction-mode-tabs { margin-bottom: 12px; overflow-x: auto; scrollbar-width: thin; }
+.deduction-map-controls.detailed-controls {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(165px, .35fr) auto auto;
+  align-items: end;
+  gap: 11px;
+}
+.deduction-map-controls .grow { min-width: 0; }
+.endgame-area-readout {
+  min-width: 142px;
+  display: grid;
+  gap: 2px;
+  padding: 9px 12px;
+  border: 1px solid rgba(30,155,128,.22);
+  border-radius: 12px;
+  background: var(--mint-100);
+}
+.endgame-area-readout span { color: var(--ink-600); font-size: .66rem; font-weight: 800; }
+.endgame-area-readout strong { color: #0c735f; font-size: 1.15rem; }
+.spatial-data-card { border-left: 4px solid var(--purple-600); }
+.compact-grid { gap: 10px; }
+.compact-grid .metric-card { min-height: 94px; padding: 14px; }
+.spatial-category-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.button-column { display: grid; justify-items: stretch; gap: 7px; }
+.button-column.compact .button { min-height: 34px; }
+.warning-text { color: #9a5d00; line-height: 1.35; }
+.deduction-shape-fields {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--ink-200);
+  border-radius: 14px;
+  background: var(--ink-50);
+}
+.deduction-shape-fields[hidden] { display: none !important; }
+.leaflet-area-mask-canvas {
+  position: absolute;
+  z-index: 425;
+  inset: 0;
+  pointer-events: none;
+  image-rendering: auto;
+}
+#deduction-map .leaflet-marker-pane,
+#deduction-map .leaflet-tooltip-pane,
+#deduction-map .leaflet-popup-pane { z-index: 620; }
+#deduction-map .leaflet-control-container { position: relative; z-index: 1000; }
+
+@media (max-width: 980px) {
+  .deduction-map-controls.detailed-controls { grid-template-columns: minmax(0,1fr) minmax(150px,.45fr); }
+  .deduction-map-controls.detailed-controls .toggle-row,
+  .deduction-map-controls.detailed-controls .endgame-area-readout { align-self: stretch; }
+}
+
+@media (max-width: 620px) {
+  .segmented-control { width: 100%; }
+  .segmented-control button { flex: 1 0 auto; padding-inline: 10px; }
+  .deduction-map-controls.detailed-controls { display: flex; align-items: stretch; }
+  .deduction-map-controls.detailed-controls .field,
+  .deduction-map-controls.detailed-controls .toggle-row,
+  .deduction-map-controls.detailed-controls .endgame-area-readout { width: 100%; }
+  .deduction-map-shell, #deduction-map { min-height: 68vh; }
+  .leaflet-area-mask-canvas { z-index: 420; }
+}
+.endgame-area-readout small { color: var(--ink-600); font-size: .61rem; line-height: 1.25; }
+.deduction-station-actions { flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 760px) {
+  .deduction-station-actions .button { flex: 0 1 auto; }
+}
+
+/* Keep the map-mode tabs inside narrow phone viewports. */
+@media (max-width: 760px) {
+  .content,
+  .content > .view-stack,
+  .view-stack > .row-between,
+  .view-stack > .row-between > .segmented {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .view-stack > .row-between > .segmented {
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-flow: initial;
+    grid-auto-columns: initial;
+  }
+  .view-stack > .row-between > .segmented button {
+    min-width: 0;
+    padding-inline: 6px;
+    font-size: .75rem;
+    white-space: normal;
+  }
+}

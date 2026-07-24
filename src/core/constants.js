@@ -1,5 +1,5 @@
 export const APP_NAME = "HideLine";
-export const APP_VERSION = "1.1.0";
+export const APP_VERSION = "1.2.0";
 export const STORAGE_KEY = "hideline:v1:state";
 export const SETTINGS_KEY = "hideline:v1:settings";
 export const SUPABASE_MODULE_URL = "https://esm.sh/@supabase/supabase-js@2?bundle";
@@ -9,6 +9,7 @@ const RUNTIME_CONFIG = typeof window !== "undefined" ? window.HIDELINE_CONFIG ||
 export const GAME_MAP_ID = RUNTIME_CONFIG.googleMapId || "1lDtKjR7rN1zelD3FjepU1XNvHmnb774";
 export const GAME_MAP_URL = `https://www.google.com/maps/d/viewer?mid=${GAME_MAP_ID}`;
 export const GAME_MAP_EMBED_URL = `https://www.google.com/maps/d/embed?mid=${GAME_MAP_ID}`;
+export const GAME_MAP_KML_URL = `https://www.google.com/maps/d/kml?mid=${GAME_MAP_ID}&forcekml=1`;
 export const HANDBOOK_FILE = "Hide and Seek_London_SG2Rs45_Handbook9.pdf";
 
 export const DEFAULT_DURATIONS = Object.freeze({
