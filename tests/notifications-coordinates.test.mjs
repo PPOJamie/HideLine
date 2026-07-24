@@ -115,12 +115,14 @@ test("the app renders live alerts and can request device notifications", () => {
   assert.match(workerSource, /notificationclick/);
 });
 
-test("Endgame uses strongly contrasting green, red and purple layers", () => {
-  assert.match(mapSource, /#00c476/);
+test("Endgame uses a clear green base, hard red exclusions and blue earlier-clue overlap", () => {
+  assert.match(mapSource, /#6ee7b7/);
   assert.match(mapSource, /#da183e/);
-  assert.match(mapSource, /#6d3db0/);
-  assert.match(mapSource, /paletteMode: "endgame"/);
+  assert.match(mapSource, /#2563eb/);
+  assert.match(mapSource, /layerKind: "history-overlap"/);
+  assert.match(mapSource, /cell\.state === "allowed"\) return/);
   assert.match(styles, /legend-eliminated::before[^}]*#da183e/s);
+  assert.match(styles, /legend-history::before[^}]*37,99,235/s);
 });
 
 test("question map coordinates are always stored with the question record", () => {

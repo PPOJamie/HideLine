@@ -47,3 +47,7 @@ Existing Supabase projects that show `column reference game_id is ambiguous` whe
 ## Upgrade to HideLine 2.2.1
 
 No database migration is required for live alerts, visible question coordinates, notification reliability or the Endgame colour update. Version 2.2.1 is a client and deployment repair; existing games and room codes remain compatible.
+## Upgrade to HideLine 2.2.2
+
+No database migration is required. Version 2.2.2 changes only client-side Endgame mask calculation and presentation. Existing games, room codes and private team-state JSON remain compatible.
+

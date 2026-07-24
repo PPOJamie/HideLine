@@ -3,9 +3,7 @@ import { escapeHtml } from "../core/format.js";
 import {
   DEDUCTION_AREA_SELECTION_ALL,
   DEDUCTION_MAP_MODES,
-  DEDUCTION_MOVEMENT,
   DEDUCTION_STATUS,
-  DEDUCTION_TOOL_TYPES,
   constraintResolution,
   constraintTitle,
   deductionSummary,
@@ -126,21 +124,6 @@ function endgameStationOptions(model) {
   return `<option value="">Choose the suspected station…</option>${model.results.map((result) => `<option value="${result.id}" ${model.endgameStation?.id === result.id ? "selected" : ""}>${escapeHtml(result.name)} — ${statusLabel(result).toLowerCase()}</option>`).join("")}`;
 }
 
-function isStationLevelEndgameConstraint(constraint) {
-  return [DEDUCTION_TOOL_TYPES.STATION_NAME, DEDUCTION_TOOL_TYPES.TRANSIT].includes(constraint?.type);
-}
-
-function isCurrentEndgameConstraint(constraint) {
-  return isStationLevelEndgameConstraint(constraint)
-    || (constraint?.movementMode === DEDUCTION_MOVEMENT.LOCKED && isMaskConstraint(constraint));
-}
-
-function isEarlierEndgameConstraint(constraint) {
-  return constraint?.movementMode !== DEDUCTION_MOVEMENT.LOCKED
-    && !isStationLevelEndgameConstraint(constraint)
-    && isMaskConstraint(constraint);
-}
-
 function renderMapHeader(model) {
   const endgame = model.roundState.mapDisplayMode === DEDUCTION_MAP_MODES.ENDGAME;
   const unresolved = [...model.resolutions.values()].filter((item) => !item.ready).length;
@@ -156,15 +139,23 @@ function renderMapHeader(model) {
   </section>`;
 }
 
+function percentLabel(fraction, unresolved = 0) {
+  if (unresolved) return "Pending";
+  if (fraction == null) return "—";
+  return `${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%`;
+}
+
 function renderMapControls(model) {
   const endgame = model.roundState.mapDisplayMode === DEDUCTION_MAP_MODES.ENDGAME;
   if (endgame) {
-    const current = model.constraints.filter(isCurrentEndgameConstraint);
-    const earlier = model.constraints.filter(isEarlierEndgameConstraint);
-    const fraction = model.endgameMask?.allowedFraction;
-    const unresolved = model.endgameMask?.unresolved?.length || 0;
-    const remaining = !current.length ? "100%" : fraction == null || unresolved ? "Pending" : `${Math.round(fraction * 100)}%`;
-    return `<div class="simple-endgame-controls"><div class="field grow"><label for="deduction-endgame-station">Endgame station</label><select id="deduction-endgame-station" data-action="deduction-endgame-station">${endgameStationOptions(model)}</select></div><div class="endgame-area-readout"><span>Approx. current area left</span><strong>${remaining}</strong><small>${current.length} hard · ${earlier.length} earlier</small></div><button class="button button-soft" type="button" data-action="deduction-exit-endgame">${icon("map")} Back to all stations</button></div>`;
+    const stationEliminated = model.endgameStation?.status === DEDUCTION_STATUS.ELIMINATED;
+    const currentUnresolved = model.endgameMask?.unresolved?.length || 0;
+    const historyUnresolved = model.endgameHistoryMask?.unresolved?.length || 0;
+    const currentArea = stationEliminated ? "0%" : percentLabel(model.endgameMask?.allowedFraction, currentUnresolved);
+    const historyCount = model.endgameHistoryMask?.constraintCount || 0;
+    const historyOverlap = historyCount ? percentLabel(model.endgameHistoryMask?.allowedFraction, historyUnresolved) : "None yet";
+    const stationStatus = model.endgameStation ? statusLabel(model.endgameStation) : "Choose a station";
+    return `<div class="simple-endgame-controls"><div class="field grow"><label for="deduction-endgame-station">Endgame station</label><select id="deduction-endgame-station" data-action="deduction-endgame-station">${endgameStationOptions(model)}</select><small class="endgame-station-status status-${escapeHtml(model.endgameStation?.status || "possible")}">All-stations result: ${escapeHtml(stationStatus)}</small></div><div class="endgame-area-readout"><span>Current area in play</span><strong>${currentArea}</strong><small>Earlier-clue overlap: ${historyOverlap}${historyCount ? ` · ${historyCount} clue${historyCount === 1 ? "" : "s"}` : ""}</small></div><button class="button button-soft" type="button" data-action="deduction-exit-endgame">${icon("map")} Back to all stations</button></div>`;
   }
   return `<div class="simple-overview-controls"><div class="simple-map-key"><span class="key-green"></span>Possible <span class="key-grey"></span>Excluded <span class="key-amber"></span>Needs data</div><label class="toggle-row"><input type="checkbox" data-action="deduction-show-eliminated" ${model.roundState.showEliminated ? "checked" : ""} /><span>Show ruled-out stations</span></label></div>`;
 }
@@ -172,9 +163,25 @@ function renderMapControls(model) {
 function renderMapExplanation(model) {
   const endgame = model.roundState.mapDisplayMode === DEDUCTION_MAP_MODES.ENDGAME;
   if (endgame) {
-    const current = model.constraints.filter(isCurrentEndgameConstraint).length;
-    const earlier = model.constraints.filter(isEarlierEndgameConstraint).length;
-    return `<div class="callout ${current || earlier ? "" : "warning"}">${icon(current ? "target" : "info")}<p><strong>All earlier answers are carried into Endgame automatically.</strong>${current ? ` ${current} station or fixed-spot answer${current === 1 ? " is" : "s are"} shown as hard red exclusions.` : " No hard current exclusion is available yet."}${earlier ? ` ${earlier} pre-Endgame location clue${earlier === 1 ? " appears" : "s appear"} as purple hatching because the hider could move after answering.` : ""} You do not need to ask the questions again.</p></div>`;
+    const station = model.endgameStation;
+    const earlier = model.endgameHistoryMask?.constraintCount || 0;
+    const overlap = model.endgameHistoryMask?.allowedFraction;
+    const stationEliminated = station?.status === DEDUCTION_STATUS.ELIMINATED;
+    const hardExcluded = Number(model.endgameMask?.excluded || 0) > 0;
+    const carried = Number(model.endgameMask?.carriedStationExclusionCount || 0);
+    if (stationEliminated) {
+      const reason = station?.failures?.[0] || model.endgameMask?.carriedStationExclusions?.[0] || "an earlier answer rules out the station";
+      return `<div class="callout danger">${icon("target")}<p><strong>This station is already ruled out.</strong> The entire circle is red because ${escapeHtml(reason)}. This now matches the result on the All stations map.</p></div>`;
+    }
+    const overlapText = earlier
+      ? overlap === 0
+        ? " The earlier clues do not overlap at one single point, which can still be valid because the hider was allowed to move between answers."
+        : " The blue area is where every earlier location clue overlaps at one point; it is a planning hint, not a hard final-position rule."
+      : "";
+    if (!hardExcluded && !carried) {
+      return `<div class="callout">${icon("info")}<p><strong>The whole green circle is currently in play.</strong> The All stations result has been carried across: this station still survives every earlier answer.${overlapText} New answers recorded during Endgame will create hard red exclusions.</p></div>`;
+    }
+    return `<div class="callout">${icon("target")}<p><strong>Green is in play now; red is ruled out now.</strong> Station facts, station-wide eliminations and answers recorded after Endgame began form the hard red mask.${overlapText}</p></div>`;
   }
   if (!model.answerConstraints.length) return `<div class="callout warning">${icon("info")}<p><strong>No area answers yet.</strong>The station circles are ready. Ask a Radar, Thermometer, Measuring, Matching or Tentacle question to begin greying out impossible areas.</p></div>`;
   return `<div class="callout">${icon("layers")}<p><strong>Everything is combined automatically.</strong>Green survives every map-ready answer. Grey is excluded by at least one answer. Amber still needs map data or player judgement.</p></div>`;
@@ -235,9 +242,9 @@ export function renderDeductionView(state) {
     ${renderMapHeader(model)}
     <section class="card card-pad stack simple-deduction-map-card">
       ${renderMapControls(model)}
-      <div class="map-shell deduction-map-shell"><div id="deduction-map" role="application" aria-label="Live deduction map"></div><div class="deduction-legend ${endgame ? "endgame-legend" : ""}" aria-label="Map legend"><span class="legend-possible">${endgame ? "Possible now" : "Possible area"}</span>${endgame ? `<span class="legend-history">Earlier clue</span>` : ""}<span class="legend-partial">Needs data</span><span class="legend-eliminated">${endgame ? "Ruled out now" : "Excluded area"}</span></div></div>
+      <div class="map-shell deduction-map-shell"><div id="deduction-map" role="application" aria-label="Live deduction map"></div><div class="deduction-legend ${endgame ? "endgame-legend" : ""}" aria-label="Map legend"><span class="legend-possible">${endgame ? "In play now" : "Possible area"}</span><span class="legend-eliminated">${endgame ? "Ruled out now" : "Excluded area"}</span>${endgame ? `<span class="legend-history">Earlier-clue overlap</span>` : ""}<span class="legend-partial">Needs data</span></div></div>
       ${renderMapExplanation(model)}
-      <p class="tiny muted">${endgame ? "Bright green is possible now, strong red is ruled out now, and purple hatching preserves where an earlier answer ruled the hider out at that time without treating it as the final fixed position. " : ""}The cells are a planning aid clipped to each 500 m circle. Use the official game map for borderline paths and entrances.</p>
+      <p class="tiny muted">${endgame ? "The pale green circle is the current fixed-spot search area. Red is a hard exclusion. Blue only highlights where all earlier movable clues overlap, so it never hides the current green/red answer. " : ""}The cells are a planning aid clipped to each 500 m circle. Use the official game map for borderline paths and entrances.</p>
     </section>
     ${renderRemainingStations(state, model)}
     ${renderAnswerLog(model)}

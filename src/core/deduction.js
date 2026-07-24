@@ -583,11 +583,30 @@ export function evaluateZoneAreaMask({
   const cells = sampleZoneCells(station, radiusMetres, cellSizeMetres);
   const context = { spatialFeatures };
   let selectedConstraints;
+  let carriedStationExclusions = [];
   if (mode === "endgame") {
     selectedConstraints = constraints.filter((constraint) =>
       STATION_LEVEL_TYPES.has(constraint.type)
       || (constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED && AREA_TYPES.has(constraint.type))
     );
+
+    // Earlier mobile answers cannot normally locate the hider's final fixed
+    // spot because the hider may move within the 500 m zone between answers.
+    // They *can*, however, rule out the station itself when no sampled point in
+    // the whole zone could have produced an answer. Carry that station-level
+    // result into Endgame so a station eliminated on the all-stations map does
+    // not incorrectly reappear as a fully possible green circle.
+    const mobileAreaRuntimes = constraints
+      .filter((constraint) => constraint.movementMode !== DEDUCTION_MOVEMENT.LOCKED && AREA_TYPES.has(constraint.type))
+      .map((constraint) => prepareConstraint(constraint, context));
+    const zoneSamples = sampleZonePoints(station, radiusMetres);
+    carriedStationExclusions = mobileAreaRuntimes.filter((runtime) => {
+      if (!runtime.ready || !zoneSamples.length) return false;
+      const values = zoneSamples.map((point) => pointPassRuntime(runtime, point));
+      const evaluated = values.filter((value) => value !== null).length;
+      const valid = values.filter((value) => value === true).length;
+      return evaluated > 0 && valid === 0;
+    });
   } else if (mode === "history") {
     selectedConstraints = constraints.filter((constraint) =>
       constraint.movementMode !== DEDUCTION_MOVEMENT.LOCKED
@@ -603,7 +622,7 @@ export function evaluateZoneAreaMask({
   const areaRuntimes = runtimes.filter((runtime) => !STATION_LEVEL_TYPES.has(runtime.constraint.type));
   const stationGeo = STATION_GEO_BY_ID.get(station?.id) || station;
   const stationResults = stationRuntimes.map((runtime) => stationLevelPass(runtime.constraint, station, stationGeo));
-  const stationFailureCount = stationResults.filter((value) => value === false).length;
+  const stationFailureCount = stationResults.filter((value) => value === false).length + carriedStationExclusions.length;
   const stationUnknownCount = stationResults.filter((value) => value === null).length;
   const stationFailed = stationFailureCount > 0;
   const unresolved = runtimes.filter((runtime) => !runtime.ready).map((runtime) => `${constraintTitle(runtime.constraint)}: ${runtime.reason}`);
@@ -651,7 +670,9 @@ export function evaluateZoneAreaMask({
     total: evaluatedCells.length,
     allowedFraction: known ? allowed / known : null,
     unresolved,
-    constraintCount: selectedConstraints.length
+    constraintCount: selectedConstraints.length + carriedStationExclusions.length,
+    carriedStationExclusionCount: carriedStationExclusions.length,
+    carriedStationExclusions: carriedStationExclusions.map((runtime) => constraintTitle(runtime.constraint))
   };
 }
 

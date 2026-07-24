@@ -1434,11 +1434,10 @@ select[multiple] option { padding: 7px 8px; border-radius: 7px; }
 .coordinate-picker-fallback svg { width: 100%; height: 100%; min-height: 360px; cursor: crosshair; touch-action: manipulation; }
 .coordinate-picker-fallback p { margin: 0; color: var(--ink-600); text-align: center; font-size: .72rem; }
 .deduction-legend .legend-history::before {
-  border-radius: 3px;
-  border: 1px solid rgba(87,42,148,.58);
-  background-color: rgba(109,61,176,.14);
-  background-image: repeating-linear-gradient(135deg, rgba(87,42,148,.72) 0 1px, transparent 1px 4px);
-  box-shadow: none;
+  border-radius: 4px;
+  border: 1px solid rgba(30,64,175,.62);
+  background: rgba(37,99,235,.34);
+  box-shadow: 0 0 0 2px rgba(37,99,235,.14);
 }
 
 @media (max-width: 760px) {
@@ -1752,12 +1751,17 @@ select[multiple] option { padding: 7px 8px; border-radius: 7px; }
 .question-location-compact { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-600); font-size: .7rem; }
 
 .deduction-legend.endgame-legend { border-color: rgba(11,31,51,.18); background: rgba(255,255,255,.96); }
-.deduction-legend.endgame-legend .legend-possible::before { width: 13px; height: 13px; border-radius: 4px; background: #00c476; box-shadow: 0 0 0 2px rgba(0,86,48,.34); }
+.deduction-legend.endgame-legend .legend-possible::before { width: 13px; height: 13px; border-radius: 4px; background: #6ee7b7; box-shadow: 0 0 0 2px rgba(6,95,70,.42); }
 .deduction-legend.endgame-legend .legend-eliminated::before { width: 13px; height: 13px; border-radius: 4px; background: #da183e; box-shadow: 0 0 0 2px rgba(103,0,24,.34); }
-.deduction-legend.endgame-legend .legend-history::before { width: 13px; height: 13px; }
+.deduction-legend.endgame-legend .legend-history::before { width: 13px; height: 13px; background: rgba(37,99,235,.42); border-color: rgba(30,64,175,.72); box-shadow: 0 0 0 2px rgba(37,99,235,.16); }
 .deduction-legend.endgame-legend .legend-partial::before { border-radius: 4px; background: #ffb800; box-shadow: 0 0 0 2px rgba(128,79,0,.22); }
-.endgame-area-readout { border-color: rgba(0,199,178,.28); background: rgba(0,199,178,.10); }
-.endgame-area-readout strong { color: #007f70; }
+.endgame-area-readout { min-width: 190px; border-color: rgba(0,153,132,.30); background: rgba(110,231,183,.18); }
+.endgame-area-readout strong { color: #047857; }
+.endgame-area-readout small { max-width: 230px; }
+.endgame-station-status { display: block; margin-top: 5px; color: var(--ink-600); font-size: .68rem; font-weight: 850; }
+.endgame-station-status.status-eliminated { color: #b4233a; }
+.endgame-station-status.status-partial { color: #986100; }
+.endgame-station-status.status-priority { color: #6941c6; }
 
 @media (max-width: 760px) {
   .game-alert-region { top: auto; right: 12px; bottom: calc(84px + var(--safe-bottom)); width: calc(100vw - 24px); }
@@ -1781,9 +1785,14 @@ select[multiple] option { padding: 7px 8px; border-radius: 7px; }
   .question-location-link { color: #e8f0f4; background: #0b2233; border-color: #27465c; }
   .question-location-link code, .question-location-open { color: #8bb8f4; }
   .deduction-legend.endgame-legend { color: #e8f0f4; background: rgba(11,34,51,.96); border-color: #456277; }
+  .endgame-area-readout { background: rgba(16,185,129,.16); border-color: rgba(110,231,183,.30); }
+  .endgame-area-readout strong { color: #6ee7b7; }
+  .endgame-station-status { color: #98aebb; }
+  .endgame-station-status.status-eliminated { color: #ff8ca0; }
+  .endgame-station-status.status-partial { color: #ffd166; }
 }
 
-/* HideLine 2.2.1 notification diagnostics */
+/* HideLine 2.2.2 notification and Endgame diagnostics */
 .notification-settings-actions {
   display: flex;
   align-items: center;

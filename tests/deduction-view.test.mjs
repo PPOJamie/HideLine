@@ -62,10 +62,11 @@ test("the Endgame view keeps earlier answers and has one clear route back", () =
   const html = renderDeductionView(stateFor("endgame"));
   assert.match(html, /data-action="deduction-exit-endgame"/);
   assert.match(html, />\s*Back to all stations\s*</);
-  assert.match(html, /All earlier answers are carried into Endgame automatically/);
-  assert.match(html, /Earlier clue/);
-  assert.match(html, /purple hatching/);
-  assert.match(html, /do not need to ask the questions again/i);
+  assert.match(html, /Current area in play/);
+  assert.match(html, /All-stations result/);
+  assert.match(html, /Earlier-clue overlap/);
+  assert.match(html, /whole green circle is currently in play/i);
+  assert.match(html, /planning hint, not a hard final-position rule/i);
 });
 
 test("the primary navigation contains only the three game-day destinations", () => {

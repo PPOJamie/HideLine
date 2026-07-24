@@ -42,9 +42,8 @@ const ENDGAME_MASK_COLOURS = Object.freeze({
 });
 
 const HISTORY_MASK = Object.freeze({
-  fill: "rgba(109, 61, 176, 0.12)",
-  stroke: "rgba(87, 42, 148, 0.55)",
-  hatch: "rgba(87, 42, 148, 0.55)"
+  fill: "rgba(37, 99, 235, 0.28)",
+  stroke: "rgba(30, 64, 175, 0.48)"
 });
 
 function excludedCellOpacity(cell) {
@@ -406,10 +405,12 @@ function drawConstraintOverlays(L, group, constraints, spatialFeatures = [], dis
 
 function constraintSetForMode({ displayMode, constraints, activeConstraint, answerConstraints = [] }) {
   if (displayMode === DEDUCTION_MAP_MODES.ANSWER) return answerConstraints.length ? answerConstraints : activeConstraint ? [activeConstraint] : [];
-  // The Endgame map carries every earlier clue forward. Mobile snapshots are
-  // styled as historical evidence while station-level and locked answers form
-  // the current hard mask.
-  if (displayMode === DEDUCTION_MAP_MODES.ENDGAME) return constraints || [];
+  // Earlier mobile answers are summarised by the single blue overlap layer in
+  // Endgame. Drawing every old radar circle, thermometer line and POI boundary
+  // over the fixed-spot map made it difficult to see the current in-play area.
+  if (displayMode === DEDUCTION_MAP_MODES.ENDGAME) {
+    return (constraints || []).filter((constraint) => constraint.movementMode === "locked");
+  }
   return constraints || [];
 }
 
@@ -422,6 +423,27 @@ function maskTargets({ displayMode, results, showEliminated, maskScope, selected
     || visible.find((result) => result.possible)
     || visible[0];
   return selected ? [selected] : [];
+}
+
+
+function forceMaskExcluded(mask, reason = "Station ruled out on the all-stations map") {
+  if (!mask?.cells?.length) return mask;
+  return {
+    ...mask,
+    cells: mask.cells.map((cell) => ({
+      ...cell,
+      state: "excluded",
+      excludedByCount: Math.max(1, Number(cell.excludedByCount) || 0),
+      unknownByCount: 0,
+      evaluatedCount: Math.max(1, Number(cell.evaluatedCount) || 0)
+    })),
+    allowed: 0,
+    excluded: mask.cells.length,
+    unknown: 0,
+    allowedFraction: 0,
+    forcedStationElimination: true,
+    forcedStationEliminationReason: reason
+  };
 }
 
 function buildAreaMaskPlans({
@@ -450,7 +472,7 @@ function buildAreaMaskPlans({
   if (displayMode === DEDUCTION_MAP_MODES.ENDGAME) {
     const station = targets[0];
     if (!station) return [];
-    const currentMask = evaluateZoneAreaMask({
+    let currentMask = evaluateZoneAreaMask({
       station,
       constraints,
       mode: "endgame",
@@ -458,6 +480,9 @@ function buildAreaMaskPlans({
       radiusMetres: 500,
       cellSizeMetres: 22
     });
+    if (station.status === DEDUCTION_STATUS.ELIMINATED && currentMask.allowed > 0) {
+      currentMask = forceMaskExcluded(currentMask, station.failures?.[0]);
+    }
     const historyMask = evaluateZoneAreaMask({
       station,
       constraints,
@@ -474,7 +499,7 @@ function buildAreaMaskPlans({
         radiusMetres: 500,
         selected: false,
         cellSizeMetres: 22,
-        layerKind: "history",
+        layerKind: "history-overlap",
         drawOutline: false,
         hardMask: currentMask
       });
@@ -532,32 +557,15 @@ function attachAreaMaskCanvas(map, plans) {
   };
 
   const drawCell = (cell, plan, cellIndex) => {
-    if (plan.layerKind === "history" && (cell.state !== "excluded" || plan.hardMask?.cells?.[cellIndex]?.state === "excluded")) return;
+    if (plan.layerKind === "history-overlap" && (cell.state !== "allowed" || plan.hardMask?.cells?.[cellIndex]?.state === "excluded")) return;
+    if (plan.paletteMode === "endgame" && cell.state === "allowed") return;
     const points = cell.corners.map((corner) => map.latLngToContainerPoint([corner.lat, corner.lng]));
-    if (plan.layerKind === "history") {
-      const xs = points.map((point) => point.x);
-      const ys = points.map((point) => point.y);
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys);
-      context.save();
+    if (plan.layerKind === "history-overlap") {
       traceCell(points);
-      context.clip();
       context.fillStyle = HISTORY_MASK.fill;
-      context.fillRect(minX, minY, maxX - minX, maxY - minY);
-      context.strokeStyle = HISTORY_MASK.hatch;
-      context.lineWidth = 1.15;
-      for (let x = minX - (maxY - minY); x <= maxX + (maxY - minY); x += 7) {
-        context.beginPath();
-        context.moveTo(x, maxY);
-        context.lineTo(x + (maxY - minY), minY);
-        context.stroke();
-      }
-      context.restore();
-      traceCell(points);
+      context.fill();
       context.strokeStyle = HISTORY_MASK.stroke;
-      context.lineWidth = 0.55;
+      context.lineWidth = 0.45;
       context.stroke();
       return;
     }
@@ -745,7 +753,6 @@ function vectorConstraintSvg(constraints, spatialFeatures = [], projection = VEC
 
 function vectorAreaMaskSvg(plans, projection = VECTOR_MAP) {
   if (!plans.length) return { defs: "", body: "" };
-  const historyPattern = `<pattern id="history-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(0)"><rect width="8" height="8" fill="#6d3db0" fill-opacity=".12" /><path d="M-2 8 L8 -2 M2 10 L10 2" stroke="#572a94" stroke-opacity=".58" stroke-width="1.35" /></pattern>`;
   const clips = plans.map((plan, index) => {
     const centre = vectorPoint(plan.station, projection);
     const radius = vectorEllipse(plan.station, plan.radiusMetres, projection);
@@ -753,11 +760,12 @@ function vectorAreaMaskSvg(plans, projection = VECTOR_MAP) {
   }).join("");
   const body = plans.map((plan, index) => {
     const cells = plan.mask.cells.map((cell, cellIndex) => {
-      if (plan.layerKind === "history") {
-        if (cell.state !== "excluded" || plan.hardMask?.cells?.[cellIndex]?.state === "excluded") return "";
-        return `<polygon class="mask-cell-history" points="${vectorPoints(cell.corners, projection)}" fill="url(#history-hatch)" stroke="#572a94" stroke-opacity=".42" stroke-width=".65" />`;
+      if (plan.layerKind === "history-overlap") {
+        if (cell.state !== "allowed" || plan.hardMask?.cells?.[cellIndex]?.state === "excluded") return "";
+        return `<polygon class="mask-cell-history-overlap" points="${vectorPoints(cell.corners, projection)}" fill="#2563eb" fill-opacity=".28" stroke="#1e40af" stroke-opacity=".42" stroke-width=".45" />`;
       }
       const endgamePalette = plan.paletteMode === "endgame";
+      if (endgamePalette && cell.state === "allowed") return "";
       const fill = endgamePalette
         ? cell.state === "excluded" ? "#da183e" : cell.state === "allowed" ? "#00c476" : "#ffb800"
         : cell.state === "excluded" ? "#4e5865" : cell.state === "allowed" ? "#1e9d7e" : "#e4a11b";
@@ -773,7 +781,7 @@ function vectorAreaMaskSvg(plans, projection = VECTOR_MAP) {
       : `<ellipse cx="${centre.x}" cy="${centre.y}" rx="${radius.rx}" ry="${radius.ry}" fill="none" stroke="${plan.selected ? "#0b1f33" : "#536273"}" stroke-width="${plan.selected ? 4 : 1.5}" stroke-opacity=".85" />`;
     return `<g clip-path="url(#zone-mask-${index})">${cells}</g>${outline}`;
   }).join("");
-  return { defs: `${historyPattern}${clips}`, body };
+  return { defs: clips, body };
 }
 
 function renderDeductionVectorMap({
@@ -811,8 +819,11 @@ function renderDeductionVectorMap({
     const centre = vectorPoint(result, projection);
     const radius = vectorEllipse(result, 500, projection);
     const palette = STATUS_COLOURS[result.status] || STATUS_COLOURS[DEDUCTION_STATUS.POSSIBLE];
-    const fillOpacity = displayMode === DEDUCTION_MAP_MODES.OVERVIEW ? (selected ? ".16" : result.status === DEDUCTION_STATUS.ELIMINATED ? ".015" : ".05") : ".015";
-    return `<ellipse cx="${centre.x}" cy="${centre.y}" rx="${radius.rx}" ry="${radius.ry}" fill="${palette.fill}" fill-opacity="${fillOpacity}" stroke="${palette.stroke}" stroke-width="${selected ? 4 : 1.4}" stroke-opacity="${result.status === DEDUCTION_STATUS.ELIMINATED ? ".45" : ".82"}" />`;
+    const endgame = displayMode === DEDUCTION_MAP_MODES.ENDGAME;
+    const fill = endgame ? "#6ee7b7" : palette.fill;
+    const stroke = endgame ? "#065f46" : palette.stroke;
+    const fillOpacity = endgame ? ".34" : displayMode === DEDUCTION_MAP_MODES.OVERVIEW ? (selected ? ".16" : result.status === DEDUCTION_STATUS.ELIMINATED ? ".015" : ".05") : ".015";
+    return `<ellipse cx="${centre.x}" cy="${centre.y}" rx="${radius.rx}" ry="${radius.ry}" fill="${fill}" fill-opacity="${fillOpacity}" stroke="${stroke}" stroke-width="${endgame || selected ? 4 : 1.4}" stroke-opacity="${endgame ? ".98" : result.status === DEDUCTION_STATUS.ELIMINATED ? ".45" : ".82"}" />`;
   }).join("");
   const markerSvg = visible.map((result) => {
     const centre = vectorPoint(result, projection);
@@ -921,11 +932,11 @@ export async function renderDeductionMap({
     if (showCircle) {
       L.circle(centre, {
         radius: 500,
-        color: selected ? "#0b1f33" : palette.stroke,
-        fillColor: palette.fill,
-        fillOpacity: displayMode === DEDUCTION_MAP_MODES.OVERVIEW ? (result.status === DEDUCTION_STATUS.ELIMINATED ? 0.015 : selected ? 0.14 : 0.045) : 0.018,
-        opacity: result.status === DEDUCTION_STATUS.ELIMINATED ? 0.45 : 0.86,
-        weight: selected ? 4 : 1.5,
+        color: endgameMode ? "#065f46" : selected ? "#0b1f33" : palette.stroke,
+        fillColor: endgameMode ? "#6ee7b7" : palette.fill,
+        fillOpacity: endgameMode ? 0.34 : displayMode === DEDUCTION_MAP_MODES.OVERVIEW ? (result.status === DEDUCTION_STATUS.ELIMINATED ? 0.015 : selected ? 0.14 : 0.045) : 0.018,
+        opacity: endgameMode ? 0.98 : result.status === DEDUCTION_STATUS.ELIMINATED ? 0.45 : 0.86,
+        weight: endgameMode ? 4 : selected ? 4 : 1.5,
         interactive: false
       }).addTo(deductionLayerGroups.zones);
     }

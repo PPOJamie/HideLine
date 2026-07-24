@@ -2,6 +2,16 @@
 
 All notable changes to HideLine are documented here.
 
+## 2.2.2 — Clear Endgame area and correct carry-forward
+
+- Replaced the dense purple exclusion hatching with a light-blue earlier-clue overlap layer.
+- Made the whole selected Endgame circle a clean pale-green in-play base and drew only hard exclusions in strong red.
+- Carried station-wide eliminations from pre-Endgame mobile answers into Endgame, so a station ruled out on the All stations map remains fully ruled out.
+- Kept partially possible mobile clues as planning context rather than falsely treating them as final-position exclusions.
+- Removed old mobile radar, thermometer and POI geometry from the Endgame canvas to reduce clutter while retaining their combined overlap result.
+- Added separate readouts for current area in play, All-stations status and earlier-clue overlap.
+- Expanded the regression suite to cover whole-station carry-forward and partially possible mobile clues. No Supabase migration is required.
+
 ## 2.2.1 — Coordinate and notification deployment repair
 
 - Stored a canonical, serialisable coordinate list on every newly asked question, while retaining backward-compatible extraction from older deduction records.

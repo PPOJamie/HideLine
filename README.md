@@ -1,24 +1,24 @@
 # HideLine — London Hide + Seek Companion
 
-HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.2.1 includes role-aware live alerts, reliable shared question coordinates, a one-tap Google Maps link and a deployment check that detects mixed or misplaced GitHub files.
+HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.2.2 keeps the live alerts and clickable question coordinates while making the Endgame map substantially clearer and carrying station-wide eliminations across from the All stations map.
 
 ![Simple HideLine game screen](assets/screenshot-simple-desktop.png)
 
 ![Simple HideLine deduction map on mobile](assets/screenshot-simple-mobile.png)
 
-## What is new in 2.2.1
+## What is new in 2.2.2
 
-- **Live game alerts:** important Connected Mode events appear as high-visibility in-app pop-ups. A hider device receives an **Answer now** alert when the seekers ask a question.
-- **Optional device alerts:** players can enable browser notifications under **Settings → Game notifications** for alerts while HideLine remains open in the background.
-- **Visible question pins:** active questions show the recorded seeker, journey-start, journey-end or reference coordinates instead of hiding them behind the optional note.
-- **One-tap Google Maps:** every shown coordinate opens the exact location in Google Maps. Completed questions retain an **Open pin** action in question history.
-- **Clearer Endgame mask:** bright green means possible now, strong red means ruled out now, purple hatching represents an earlier mobile clue and amber means the result still needs map data or judgement.
-- **Previous fixes retained:** Connected Mode maps preserve their view and avoid heartbeat refreshes, and the 2.1.3 interface/cache repair remains in place.
+- **Clear Endgame search area:** the selected 500 m circle is now a clean pale-green base. Only genuine hard exclusions are drawn over it in strong red, so the map remains readable.
+- **Earlier clues shown as overlap, not noise:** the former dense purple hatching has been replaced by a light blue planning layer that shows where all earlier movable clues overlap at one point.
+- **All-stations eliminations carry across:** if an earlier answer leaves no valid point anywhere in a station's full 500 m zone, the whole Endgame circle is red rather than incorrectly returning to green.
+- **Plain-language status:** the Endgame panel now shows the All-stations result, current area in play and earlier-clue overlap separately.
+- **Less map clutter:** old radar circles, thermometer lines and POI overlays are no longer redrawn over the Endgame circle. Their combined result remains available through the blue overlap layer.
+- **Previous 2.2 fixes retained:** role-aware pop-ups, optional device alerts, reliable stored coordinates, Google Maps links and deployment diagnostics remain included.
 
 ## What was added in 2.1
 
 - **More accurate Thames guidance:** the old coarse centreline has been replaced by a 614-point planning guide generated from 57 bridge-anchored control points and interpolated at roughly 35 m spacing. The online map leaves the OpenStreetMap water polygon visible instead of drawing a thick approximate river over it.
-- **Earlier clues remain visible in Endgame:** station-level facts and answers recorded while the hider is fixed remain hard red exclusions. Pre-Endgame location answers are carried into the selected circle as purple historical hatching, because the hider was allowed to move after answering. No question needs to be asked again merely to show its earlier result.
+- **Earlier clues remain visible in Endgame:** station-level facts and answers recorded while the hider is fixed remain hard red exclusions. Pre-Endgame location answers are carried into the selected circle as a blue overlap hint because the hider was allowed to move after answering. No question needs to be asked again merely to show its earlier result.
 - **Pick coordinates from map:** every coordinate-based question now has a button that opens a map. Tap the location or drag the marker, optionally use device GPS, then choose **Use this point**. HideLine fills the latitude, longitude and shared Google Maps pin.
 
 
@@ -63,11 +63,11 @@ The seeker map no longer asks players to choose between technical layers. It alw
 - **Grey** — at least one answered question excludes it.
 - **Amber** — the clue needs source map data or player judgement.
 
-In the dedicated Endgame circle, the current fixed-location result is deliberately more contrasting: **bright green** remains possible and **strong red** is ruled out. Purple hatching preserves earlier mobile clues without treating them as the hider's final position.
+In the dedicated Endgame circle, the current fixed-location result is deliberately simple: the pale-green base is currently in play and strong red is ruled out. A light-blue overlay shows where all earlier mobile clues overlap at one point without pretending that those clues fix the final hiding spot.
 
 The heading shows how many stations remain. The station list, answer audit and map setup are available below the map but stay collapsed until needed.
 
-Before Endgame, each answer is treated as a separate snapshot because the hiders may move within their station zone between questions. In Endgame, all earlier clues are brought into the chosen 500 m circle automatically: station facts and fixed-spot answers act as hard current exclusions, while earlier mobile answers remain visible as purple historical evidence. New Endgame answers are intersected at one fixed location because the hiders must remain at the hiding spot.
+Before Endgame, each answer is treated as a separate snapshot because the hiders may move within their station zone between questions. In Endgame, all earlier clues are brought into the chosen 500 m circle automatically. A clue that rules out the entire station remains a hard red result; other earlier mobile answers appear only as a blue overlap hint. New Endgame answers are intersected at one fixed location because the hiders must remain at the hiding spot.
 
 Radar, Thermometer, station-name, transit-line and Thames-side deductions work immediately. Coordinate-based question forms include **Pick coordinates from map**, so players do not need to look up or type latitude and longitude manually. Tentacles and questions based on curated points of interest or administrative boundaries need the Google My Maps KML/KMZ imported once under **Map setup and reset**. When source geometry is unavailable, HideLine marks the clue as unresolved rather than inventing an answer.
 
@@ -110,7 +110,7 @@ window.HIDELINE_CONFIG = {
 };
 ```
 
-HideLine 2.2.1 requires **no new Supabase migration for notifications, question-pin display or Endgame colour changes**. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
+HideLine 2.2.2 requires **no new Supabase migration for notifications, question-pin display or Endgame-map changes**. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
 
 ## Privacy model
 

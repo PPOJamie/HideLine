@@ -416,6 +416,48 @@ test("pre-Endgame area answers are retained as a separate historical mask", () =
   assert.ok(history.excluded > 0);
 });
 
+
+
+test("a pre-Endgame clue that eliminates the whole station stays eliminated in Endgame", () => {
+  const station = { id: "endgame-carried-elimination", name: "Carried elimination", lat: 51.5, lng: -0.1 };
+  const constraint = {
+    id: "old-radar-impossible",
+    type: DEDUCTION_TOOL_TYPES.RADAR,
+    movementMode: DEDUCTION_MOVEMENT.MOBILE,
+    centre: { lat: 51.5, lng: -0.07 },
+    radiusMetres: 150,
+    answer: "yes"
+  };
+  const allStations = evaluateStationPossibilities({ stations: [station], constraints: [constraint] })[0];
+  const endgame = evaluateZoneAreaMask({ station, constraints: [constraint], mode: "endgame", cellSizeMetres: 40 });
+  assert.equal(allStations.baseStatus, DEDUCTION_STATUS.ELIMINATED);
+  assert.equal(endgame.carriedStationExclusionCount, 1);
+  assert.equal(endgame.allowed, 0);
+  assert.equal(endgame.excluded, endgame.total);
+  assert.equal(endgame.allowedFraction, 0);
+});
+
+test("a partly possible pre-Endgame clue does not falsely rule out the final hiding spot", () => {
+  const station = { id: "endgame-mobile-partial", name: "Mobile partial", lat: 51.5, lng: -0.1 };
+  const constraint = {
+    id: "old-radar-partial",
+    type: DEDUCTION_TOOL_TYPES.RADAR,
+    movementMode: DEDUCTION_MOVEMENT.MOBILE,
+    centre: { lat: 51.5, lng: -0.096 },
+    radiusMetres: 420,
+    answer: "yes"
+  };
+  const allStations = evaluateStationPossibilities({ stations: [station], constraints: [constraint] })[0];
+  const current = evaluateZoneAreaMask({ station, constraints: [constraint], mode: "endgame", cellSizeMetres: 40 });
+  const history = evaluateZoneAreaMask({ station, constraints: [constraint], mode: "history", cellSizeMetres: 40 });
+  assert.equal(allStations.baseStatus, DEDUCTION_STATUS.PARTIAL);
+  assert.equal(current.carriedStationExclusionCount, 0);
+  assert.equal(current.excluded, 0);
+  assert.equal(current.allowed, current.total);
+  assert.ok(history.allowed > 0);
+  assert.ok(history.excluded > 0);
+});
+
 test("the Endgame circle intersects all locked answer areas at one fixed point", () => {
   const station = { id: "endgame-mask", name: "Endgame mask", lat: 51.5, lng: -0.1 };
   const constraints = [
