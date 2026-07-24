@@ -1,5 +1,5 @@
-const CACHE_VERSION = "hideline-shell-v2.0.0";
-const RUNTIME_CACHE = "hideline-runtime-v2.0.0";
+const CACHE_VERSION = "hideline-shell-v2.1.0";
+const RUNTIME_CACHE = "hideline-runtime-v2.1.0";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -26,6 +26,7 @@ const APP_SHELL = [
   "./src/data/question-deduction.js",
   "./src/data/rules.js",
   "./src/data/boundary.js",
+  "./src/data/thames-centreline.js",
   "./src/data/station-geo.js",
   "./src/services/geolocation.js",
   "./src/services/tfl.js",

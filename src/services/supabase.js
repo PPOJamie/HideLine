@@ -23,7 +23,7 @@ export class SupabaseSync extends EventTarget {
     this.client = createClient(url.trim().replace(/\/$/, ""), anonKey.trim(), {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
       realtime: { params: { eventsPerSecond: 10 } },
-      global: { headers: { "x-client-info": "hideline/1.1.0" } }
+      global: { headers: { "x-client-info": "hideline/2.1.0" } }
     });
     const { data: sessionData } = await this.client.auth.getSession();
     this.session = sessionData.session;

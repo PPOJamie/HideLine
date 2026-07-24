@@ -17,6 +17,14 @@ Run `migrations/002_deduction_map.sql` once. It updates the default team-state f
 
 Existing `team_states` rows do not need a table migration because their `state` column is JSONB. The client adds the property when a team first saves its deduction board.
 
+## Upgrade to HideLine 2.1
+
+No database migration is required when upgrading from HideLine 1.1 or later. Version 2.1 changes client-side map calculations and controls while retaining the existing shared and team-private JSON state.
+
+## Upgrade to HideLine 2.0
+
+No database migration is required when upgrading from HideLine 1.1, 1.2 or 1.3. Version 2.0 changes the client interface while retaining the existing shared and team-private JSON state.
+
 ## Upgrade from HideLine 1.1 to 1.2
 
 No SQL migration is required. Detailed area masks, the Endgame station selection and imported simplified spatial geometry are stored inside the existing team-private JSONB state.

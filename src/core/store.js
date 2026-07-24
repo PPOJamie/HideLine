@@ -121,21 +121,6 @@ export class Store extends EventTarget {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
       this.state = saved ? mergeDeep(defaults, saved) : defaults;
-      const previousSchema = Number(saved?.schemaVersion || 0);
-      if (previousSchema < 4) {
-        this.state.schemaVersion = 4;
-        if ([VIEWS.TOOLS].includes(this.state.ui.view)) this.state.ui.view = VIEWS.PLAY;
-        this.state.ui.mapMode = "deduction";
-        const rounds = this.state.privateTeamState?.deductionByRound || {};
-        for (const roundState of Object.values(rounds)) {
-          if (!roundState || typeof roundState !== "object") continue;
-          roundState.mapDisplayMode = roundState.mapDisplayMode === "endgame" ? "endgame" : "answer";
-          roundState.areaConstraintId = "all";
-          roundState.maskScope = "all";
-          roundState.showAreaMask = true;
-          roundState.showZones = true;
-        }
-      }
     } catch {
       this.state = defaults;
     }

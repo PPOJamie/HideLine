@@ -11,7 +11,8 @@ import {
   normaliseDeductionRoundState,
   sampleZoneCells,
   sampleZonePoints,
-  thamesSide
+  thamesSide,
+  THAMES_CENTRELINE
 } from "../src/core/deduction.js";
 import { STATION_GEO } from "../src/data/station-geo.js";
 import { QUESTIONS } from "../src/data/questions.js";
@@ -194,6 +195,23 @@ test("the simplified Thames guide distinguishes central north and south points",
   assert.equal(thamesSide({ lat: 51.49, lng: -0.11 }), "south");
 });
 
+test("the remapped Thames guide follows the western bends rather than cutting through land", () => {
+  assert.ok(THAMES_CENTRELINE.length > 500);
+  assert.ok(THAMES_CENTRELINE.some((point) => point.lng < -0.22 && point.lat > 51.485));
+  assert.ok(THAMES_CENTRELINE.some((point) => point.lng < -0.20 && point.lat < 51.461));
+  assert.equal(thamesSide({ lat: 51.495, lng: -0.225 }), "north");
+  assert.equal(thamesSide({ lat: 51.475, lng: -0.225 }), "south");
+  assert.equal(thamesSide({ lat: 51.4863, lng: -0.22483 }), "both");
+  assert.equal(thamesSide({ lat: 51.46665, lng: -0.21339 }), "both");
+  assert.equal(thamesSide({ lat: 51.4595, lng: -0.20583 }), "both");
+  assert.equal(thamesSide({ lat: 51.475, lng: -0.19 }), "north");
+  assert.equal(thamesSide({ lat: 51.455, lng: -0.19 }), "south");
+  assert.equal(thamesSide({ lat: 51.465, lng: -0.18806 }), "both");
+  assert.equal(thamesSide({ lat: 51.47306, lng: -0.17917 }), "both");
+  assert.equal(thamesSide({ lat: 51.48111, lng: -0.1725 }), "both");
+});
+
+
 
 test("all 55 handbook questions are linked to either automatic geometry or guided review", () => {
   assert.equal(QUESTIONS.length, 55);
@@ -358,6 +376,44 @@ test("Tentacles keeps cells closest to the named valid POI within two kilometres
   assert.ok(mask.allowed > 0);
   assert.ok(mask.excluded > 0);
   assert.equal(mask.unknown, 0);
+});
+
+test("Endgame hard masks retain station-level answers asked before Endgame", () => {
+  const station = { id: "endgame-station-fact", name: "Tower Hill", lat: 51.5, lng: -0.1 };
+  const mask = evaluateZoneAreaMask({
+    station,
+    constraints: [{
+      id: "old-name-answer",
+      type: DEDUCTION_TOOL_TYPES.STATION_NAME,
+      movementMode: DEDUCTION_MOVEMENT.MOBILE,
+      seekerLength: 13,
+      answer: "same"
+    }],
+    mode: "endgame",
+    cellSizeMetres: 50
+  });
+  assert.equal(mask.constraintCount, 1);
+  assert.equal(mask.allowed, 0);
+  assert.ok(mask.excluded > 0);
+});
+
+test("pre-Endgame area answers are retained as a separate historical mask", () => {
+  const station = { id: "endgame-history", name: "Endgame history", lat: 51.5, lng: -0.1 };
+  const constraints = [{
+    id: "old-radar",
+    type: DEDUCTION_TOOL_TYPES.RADAR,
+    movementMode: DEDUCTION_MOVEMENT.MOBILE,
+    centre: { lat: 51.5, lng: -0.096 },
+    radiusMetres: 420,
+    answer: "yes"
+  }];
+  const current = evaluateZoneAreaMask({ station, constraints, mode: "endgame", cellSizeMetres: 40 });
+  const history = evaluateZoneAreaMask({ station, constraints, mode: "history", cellSizeMetres: 40 });
+  assert.equal(current.constraintCount, 0);
+  assert.equal(current.excluded, 0);
+  assert.equal(history.constraintCount, 1);
+  assert.ok(history.allowed > 0);
+  assert.ok(history.excluded > 0);
 });
 
 test("the Endgame circle intersects all locked answer areas at one fixed point", () => {

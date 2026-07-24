@@ -10,12 +10,14 @@ import {
   DEDUCTION_MOVEMENT,
   DEDUCTION_TOOL_TYPES,
   createDeductionRoundState,
-  normaliseDeductionRoundState
+  normaliseDeductionRoundState,
+  thamesSide
 } from "./core/deduction.js";
 import { QUESTION_BY_ID, repeatedReward } from "./data/questions.js";
 import { questionDeductionConfig } from "./data/question-deduction.js";
 import { STATIONS, STATION_BY_ID, stationNameLength } from "./data/stations.js";
 import { STATION_GEO_BY_ID } from "./data/station-geo.js";
+import { LONDON_MAP_CENTRE } from "./data/boundary.js";
 import { SupabaseSync } from "./services/supabase.js";
 import { LocationService } from "./services/geolocation.js";
 import { compressImage } from "./services/media.js";
@@ -27,12 +29,15 @@ import { cachedStationCoordinates, resolveStationCoordinates } from "./services/
 import {
   beginDeductionMapPick,
   cancelDeductionMapPick,
+  destroyCoordinatePickerMap,
   destroyDeductionMap,
   destroyZoneMap,
   focusDeductionStation,
+  renderCoordinatePickerMap,
   renderDeductionMap,
   renderMapFallback,
   renderZoneMap,
+  updateCoordinatePickerPoint,
   updateZoneMap
 } from "./services/map.js";
 import { renderShell } from "./ui/shell.js";
@@ -51,6 +56,8 @@ class HideLineApp {
     this.sync = new SupabaseSync();
     this.location = new LocationService();
     this.modalContext = null;
+    this.coordinatePickerContext = null;
+    this.coordinatePickerRenderToken = 0;
     this.deferredInstallPrompt = null;
     this.remoteRefreshTimer = null;
     this.renderTimer = null;
@@ -82,7 +89,13 @@ class HideLineApp {
     this.root.addEventListener("input", (event) => this.handleInput(event));
     this.root.addEventListener("change", (event) => this.handleChange(event));
     this.root.addEventListener("close", (event) => {
+      if (event.target?.id === "coordinate-picker-modal") {
+        destroyCoordinatePickerMap();
+        this.coordinatePickerContext = null;
+        return;
+      }
       if (event.target?.id !== "app-modal") return;
+      this.closeCoordinatePicker();
       this.modalContext = null;
       this.revokeEvidenceUrl();
     }, true);
@@ -116,15 +129,14 @@ class HideLineApp {
     }
     this.root.innerHTML = renderShell(state, content);
     this.restoreModal();
+    this.restoreCoordinatePicker();
     this.restoreFocus(focus);
     this.afterRender();
   }
 
   afterRender() {
     const state = this.store.get();
-    const connectedHider = state.connection.mode === "connected" && state.game && state.profile.team === state.game.hiderTeam;
-    const effectiveMapMode = connectedHider && state.ui.mapMode === "deduction" ? "zone" : state.ui.mapMode;
-    if (state.ui.view === VIEWS.MAP && effectiveMapMode === "zone") {
+    if (state.ui.view === VIEWS.MAP && state.ui.mapMode === "zone") {
       destroyDeductionMap();
       const station = this.stationMapObject();
       const positions = this.mapPositions();
@@ -134,7 +146,7 @@ class HideLineApp {
       });
       return;
     }
-    if (state.ui.view === VIEWS.MAP && effectiveMapMode === "deduction") {
+    if (state.ui.view === VIEWS.MAP && state.ui.mapMode === "deduction") {
       destroyZoneMap();
       const model = buildDeductionViewModel(state);
       if (!model.canView) {
@@ -144,14 +156,14 @@ class HideLineApp {
       renderDeductionMap({
         results: model.results,
         constraints: model.constraints,
-        showEliminated: model.roundState.showEliminated,
-        showZones: model.roundState.showZones,
-        showAreaMask: model.roundState.showAreaMask,
-        displayMode: model.roundState.mapDisplayMode,
-        maskScope: model.roundState.maskScope,
-        activeConstraint: model.activeAreaConstraint,
+        showEliminated: true,
+        showZones: true,
+        showAreaMask: true,
+        displayMode: model.displayMode,
+        maskScope: model.displayMode === DEDUCTION_MAP_MODES.ENDGAME ? "selected" : "all",
+        activeConstraint: null,
         answerConstraints: model.answerConstraints,
-        answerSelectionAll: model.areaSelectionAll,
+        answerSelectionAll: true,
         endgameStation: model.endgameStation,
         spatialFeatures: model.spatialData.features,
         selectedStationId: state.ui.deductionSelectedStationId || null,
@@ -217,6 +229,7 @@ class HideLineApp {
   }
 
   closeModal() {
+    this.closeCoordinatePicker();
     const dialog = document.getElementById("app-modal");
     if (dialog?.open) dialog.close();
     this.modalContext = null;
@@ -271,8 +284,10 @@ class HideLineApp {
     try {
       switch (action) {
         case "navigate": this.store.patch("ui.view", button.dataset.view); this.updateUrlView(button.dataset.view); break;
+        case "navigate-tool": this.store.patch("ui.selectedTool", button.dataset.tool || "score"); this.store.patch("ui.view", VIEWS.TOOLS); this.updateUrlView(VIEWS.TOOLS); break;
+        case "navigate-map-mode": cancelDeductionMapPick(); this.store.patch("ui.mapMode", button.dataset.mode || "deduction"); this.store.patch("ui.view", VIEWS.MAP); this.updateUrlView(VIEWS.MAP); break;
+        case "navigate-deduction-map": cancelDeductionMapPick(); this.store.patch("ui.mapMode", "deduction"); this.store.patch("ui.view", VIEWS.MAP); this.updateUrlView(VIEWS.MAP); if (this.store.get().game?.phase === PHASES.ENDGAME) await this.setDeductionMapDisplay(DEDUCTION_MAP_MODES.ENDGAME); else await this.showAllDeductionConstraints(); break;
         case "open-modal": this.openModal(button.dataset.modal); break;
-        case "open-game-kit": this.openGameKit(); break;
         case "close-modal": this.closeModal(); break;
         case "dismiss-toast": button.closest(".toast")?.remove(); break;
         case "install-app": await this.installApp(); break;
@@ -282,6 +297,10 @@ class HideLineApp {
         case "deduction-show-constraint": await this.showDeductionConstraint(button.dataset.id); break;
         case "deduction-exit-endgame": await this.exitDeductionEndgameView(); break;
         case "deduction-fill-gps": await this.fillDeductionCoordinates(button.dataset.prefix, button); break;
+        case "coordinate-picker-open": await this.openCoordinatePicker(button); break;
+        case "coordinate-picker-cancel": this.closeCoordinatePicker(); break;
+        case "coordinate-picker-use-gps": await this.useCoordinatePickerGps(); break;
+        case "coordinate-picker-confirm": this.confirmCoordinatePicker(); break;
         case "deduction-pick-map": this.startDeductionMapPick(button.dataset.prefix, button); break;
         case "deduction-pick-vertex": this.startDeductionVertexPick(button); break;
         case "deduction-clear-vertices": this.clearDeductionVertices(button); break;
@@ -416,13 +435,6 @@ class HideLineApp {
     const url = new URL(location.href);
     url.searchParams.set("view", view);
     history.replaceState({}, "", url);
-  }
-
-  openGameKit() {
-    const kit = document.querySelector("details.game-kit");
-    if (!kit) return;
-    kit.open = true;
-    kit.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   async installApp() {
@@ -1103,7 +1115,7 @@ class HideLineApp {
 
   async setDeductionMapDisplay(mode) {
     const allowed = new Set(Object.values(DEDUCTION_MAP_MODES));
-    const nextMode = allowed.has(mode) ? mode : DEDUCTION_MAP_MODES.ANSWER;
+    const nextMode = allowed.has(mode) ? mode : DEDUCTION_MAP_MODES.OVERVIEW;
     if (nextMode !== DEDUCTION_MAP_MODES.ENDGAME) this.store.patch("ui.deductionSelectedStationId", null, { persist: true });
     await this.mutateDeduction((roundState) => {
       roundState.mapDisplayMode = nextMode;
@@ -1147,8 +1159,8 @@ class HideLineApp {
       roundState.areaConstraintId = DEDUCTION_AREA_SELECTION_ALL;
       roundState.endgameStationId = null;
       roundState.maskScope = "all";
-      roundState.showAreaMask = true;
       roundState.showZones = true;
+      roundState.showAreaMask = true;
       roundState.showEliminated = true;
     }, { history: false });
   }
@@ -1419,6 +1431,120 @@ class HideLineApp {
     this.toast("GPS coordinates added.", "success");
   }
 
+  coordinatePointFromForm(form, prefix) {
+    const latRaw = String(form?.querySelector(`[name="${CSS.escape(prefix)}Lat"]`)?.value || "").trim();
+    const lngRaw = String(form?.querySelector(`[name="${CSS.escape(prefix)}Lng"]`)?.value || "").trim();
+    if (!latRaw || !lngRaw) return null;
+    const lat = Number(latRaw);
+    const lng = Number(lngRaw);
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  }
+
+  coordinatePickerForm() {
+    const formName = this.coordinatePickerContext?.formName;
+    if (formName) return this.root.querySelector(`form[data-form="${CSS.escape(formName)}"]`);
+    return document.getElementById("app-modal")?.querySelector("form") || null;
+  }
+
+  async openCoordinatePicker(button) {
+    const form = button.closest("form");
+    if (!form) throw new Error("Open the question form first.");
+    const prefix = String(button.dataset.prefix || "").trim();
+    if (!prefix) throw new Error("This coordinate field could not be identified.");
+    const initialPoint = this.coordinatePointFromForm(form, prefix)
+      || this.store.get().location.current
+      || { lat: LONDON_MAP_CENTRE.lat, lng: LONDON_MAP_CENTRE.lng };
+    this.coordinatePickerContext = {
+      prefix,
+      label: button.dataset.label || "Question location",
+      formName: form.dataset.form || "",
+      point: initialPoint
+    };
+    await this.renderCurrentCoordinatePicker();
+  }
+
+  restoreCoordinatePicker() {
+    if (!this.coordinatePickerContext) return;
+    this.renderCurrentCoordinatePicker().catch((error) => console.warn("Coordinate picker could not be restored", error));
+  }
+
+  async renderCurrentCoordinatePicker() {
+    const context = this.coordinatePickerContext;
+    const dialog = document.getElementById("coordinate-picker-modal");
+    if (!context || !dialog) return;
+    const token = ++this.coordinatePickerRenderToken;
+    const point = context.point || { lat: LONDON_MAP_CENTRE.lat, lng: LONDON_MAP_CENTRE.lng };
+    dialog.innerHTML = `
+      <div class="modal-frame coordinate-picker-frame">
+        <header class="modal-header">
+          <div><p class="eyebrow">Choose on map</p><h2>${escapeHtml(context.label)}</h2><p>Tap the map or drag the pin, then select <strong>Use this point</strong>.</p></div>
+          <button class="icon-button" type="button" data-action="coordinate-picker-cancel" aria-label="Close coordinate map">×</button>
+        </header>
+        <div class="modal-body coordinate-picker-body">
+          <div id="coordinate-picker-map" class="coordinate-picker-map" role="application" aria-label="Map for choosing question coordinates"></div>
+          <div class="coordinate-picker-readout" aria-live="polite">
+            <span>Selected point</span>
+            <strong id="coordinate-picker-readout">${Number(point.lat).toFixed(6)}, ${Number(point.lng).toFixed(6)}</strong>
+          </div>
+          <div class="coordinate-picker-actions">
+            <button class="button button-soft" type="button" data-action="coordinate-picker-use-gps">Use my GPS</button>
+            <button class="button button-soft" type="button" data-action="coordinate-picker-cancel">Cancel</button>
+            <button class="button button-primary" type="button" data-action="coordinate-picker-confirm">Use this point</button>
+          </div>
+        </div>
+      </div>`;
+    if (!dialog.open) {
+      try { dialog.showModal(); }
+      catch { dialog.show(); }
+    }
+    await renderCoordinatePickerMap({
+      initialPoint: point,
+      onChange: (selected) => this.setCoordinatePickerPoint(selected)
+    });
+    if (token !== this.coordinatePickerRenderToken || !this.coordinatePickerContext) destroyCoordinatePickerMap();
+  }
+
+  setCoordinatePickerPoint(point) {
+    if (!this.coordinatePickerContext) return;
+    const lat = Number(point?.lat);
+    const lng = Number(point?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    this.coordinatePickerContext.point = { lat, lng };
+    const readout = document.getElementById("coordinate-picker-readout");
+    if (readout) readout.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  }
+
+  async useCoordinatePickerGps() {
+    if (!this.coordinatePickerContext) return;
+    const point = await this.location.getCurrent({ timeout: 12_000, maximumAge: 15_000 });
+    this.setCoordinatePickerPoint(point);
+    updateCoordinatePickerPoint(point, { pan: true });
+  }
+
+  confirmCoordinatePicker() {
+    const context = this.coordinatePickerContext;
+    if (!context?.point) throw new Error("Choose a point on the map first.");
+    const form = this.coordinatePickerForm();
+    if (!form) throw new Error("The question form is no longer open.");
+    this.fillCoordinateFields(form, context.prefix, context.point);
+    const pinInput = form.querySelector('[name="pinLabel"]');
+    if (pinInput && !String(pinInput.value || "").trim()) {
+      const lat = Number(context.point.lat).toFixed(6);
+      const lng = Number(context.point.lng).toFixed(6);
+      pinInput.value = `https://www.google.com/maps?q=${lat},${lng}`;
+    }
+    this.closeCoordinatePicker();
+    this.toast("Map coordinates added.", "success");
+  }
+
+  closeCoordinatePicker() {
+    this.coordinatePickerRenderToken += 1;
+    destroyCoordinatePickerMap();
+    const dialog = document.getElementById("coordinate-picker-modal");
+    if (dialog?.open) dialog.close();
+    this.coordinatePickerContext = null;
+  }
+
   startDeductionMapPick(prefix, button) {
     const form = button.closest("form");
     if (!form) throw new Error("Open a deduction tool first.");
@@ -1564,12 +1690,13 @@ class HideLineApp {
       };
     }
     if (question.id === "matching-landmass") {
-      if (!["north", "south", "both"].includes(data.deductionSeekerSide)) throw new Error("Choose the seeker's side of the Thames.");
+      const seeker = this.deductionPoint(data, "deductionSeeker", "the seeker pin");
       return {
         enabled: true,
         type: DEDUCTION_TOOL_TYPES.THAMES,
         movementMode,
-        seekerSide: data.deductionSeekerSide
+        seeker,
+        seekerSide: thamesSide(seeker)
       };
     }
 

@@ -4,6 +4,8 @@ import { QUESTION_DEDUCTION } from "../src/data/question-deduction.js";
 import { APP_VERSION } from "../src/core/constants.js";
 import { APPROXIMATE_GAME_BOUNDARY } from "../src/data/boundary.js";
 import { RAIL_LINES, STATION_GEO } from "../src/data/station-geo.js";
+import { THAMES_CENTRELINE } from "../src/data/thames-centreline.js";
+import { haversineMetres } from "../src/core/geo.js";
 import { access, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +34,16 @@ assert(QUESTIONS.every((question) => QUESTION_DEDUCTION[question.id]), "Every ha
 assert(Object.keys(QUESTION_DEDUCTION).every((id) => QUESTIONS.some((question) => question.id === id)), "The deduction capability map must not contain unknown question IDs.");
 assert(APPROXIMATE_GAME_BOUNDARY.length >= 4, "The planning boundary needs at least four coordinates.");
 assert(JSON.stringify(APPROXIMATE_GAME_BOUNDARY[0]) === JSON.stringify(APPROXIMATE_GAME_BOUNDARY.at(-1)), "The planning polygon must be closed.");
+assert(THAMES_CENTRELINE.length >= 500, `Expected a densely interpolated Thames guide, found ${THAMES_CENTRELINE.length} points.`);
+assert(THAMES_CENTRELINE.every((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng) && Number.isFinite(point.halfWidthMetres)), "Every Thames guide point needs latitude, longitude and a half-width.");
+assert(THAMES_CENTRELINE[0].lng < THAMES_CENTRELINE.at(-1).lng, "The Thames guide must run broadly west to east.");
+const thamesSegmentMetres = (a, b) => {
+  const meanLatRadians = (((a.lat + b.lat) / 2) * Math.PI) / 180;
+  const north = (b.lat - a.lat) * 111_320;
+  const east = (b.lng - a.lng) * 111_320 * Math.cos(meanLatRadians);
+  return Math.hypot(east, north);
+};
+assert(THAMES_CENTRELINE.every((point, index, points) => index === 0 || thamesSegmentMetres(points[index - 1], point) <= 36), "Adjacent Thames guide points must remain within the 35 m interpolation target.");
 
 const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
 assert(packageJson.version === APP_VERSION, `package.json version ${packageJson.version} must match app version ${APP_VERSION}.`);
@@ -60,4 +72,4 @@ if (failures.length) {
   console.error(failures.map((failure) => `- ${failure}`).join("\n"));
   process.exit(1);
 }
-console.log(`Validated HideLine ${APP_VERSION}: ${STATIONS.length} stations and coordinates, all ${QUESTIONS.length} linked questions, ${RAIL_LINES.length} line presets, the planning boundary and install assets.`);
+console.log(`Validated HideLine ${APP_VERSION}: ${STATIONS.length} stations and coordinates, all ${QUESTIONS.length} linked questions, ${RAIL_LINES.length} line presets, the planning boundary, ${THAMES_CENTRELINE.length}-point remapped Thames guide and install assets.`);

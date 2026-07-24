@@ -11,6 +11,9 @@ import {
 } from "./spatial.js";
 import { stationNameLength } from "../data/stations.js";
 import { STATION_GEO, STATION_GEO_BY_ID, RAIL_LINE_BY_ID, stationsForLine } from "../data/station-geo.js";
+import { THAMES_CENTRELINE, THAMES_DATA_ATTRIBUTION } from "../data/thames-centreline.js";
+
+export { THAMES_CENTRELINE, THAMES_DATA_ATTRIBUTION };
 
 export const DEDUCTION_STATUS = Object.freeze({
   POSSIBLE: "possible",
@@ -64,21 +67,6 @@ const AREA_TYPES = new Set([
   DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE,
   DEDUCTION_TOOL_TYPES.TENTACLE,
   DEDUCTION_TOOL_TYPES.MANUAL_AREA
-]);
-
-export const THAMES_CENTRELINE = Object.freeze([
-  { lat: 51.4874, lng: -0.2100 },
-  { lat: 51.4887, lng: -0.1900 },
-  { lat: 51.4876, lng: -0.1700 },
-  { lat: 51.4849, lng: -0.1500 },
-  { lat: 51.4867, lng: -0.1350 },
-  { lat: 51.4927, lng: -0.1200 },
-  { lat: 51.4996, lng: -0.1100 },
-  { lat: 51.5042, lng: -0.1000 },
-  { lat: 51.5070, lng: -0.0870 },
-  { lat: 51.5076, lng: -0.0740 },
-  { lat: 51.5055, lng: -0.0600 },
-  { lat: 51.5016, lng: -0.0450 }
 ]);
 
 export function createDeductionRoundState() {
@@ -229,18 +217,32 @@ function closestPolylineSegment(point, line) {
     const distance = Math.hypot(cx, cy);
     if (!best || distance < best.distance) {
       const cross = dx * -ay - dy * -ax;
-      best = { distance, cross };
+      const widthA = Number(a.halfWidthMetres);
+      const widthB = Number(b.halfWidthMetres);
+      const halfWidthMetres = Number.isFinite(widthA) && Number.isFinite(widthB)
+        ? widthA + (widthB - widthA) * t
+        : Number.isFinite(widthA)
+          ? widthA
+          : Number.isFinite(widthB)
+            ? widthB
+            : 45;
+      best = { distance, cross, halfWidthMetres, segmentIndex: index, segmentProgress: t };
     }
   }
   return best;
 }
 
-export function thamesSide(point, toleranceMetres = 35) {
+export function thamesSide(point, toleranceMetres = null) {
   const parsed = finitePoint(point);
   if (!parsed) return "unknown";
   const nearest = closestPolylineSegment(parsed, THAMES_CENTRELINE);
   if (!nearest) return "unknown";
-  if (nearest.distance <= toleranceMetres) return "both";
+  const hasExplicitTolerance = toleranceMetres !== null && toleranceMetres !== undefined && toleranceMetres !== "";
+  const explicitTolerance = hasExplicitTolerance ? Number(toleranceMetres) : Number.NaN;
+  const riverTolerance = Number.isFinite(explicitTolerance)
+    ? Math.max(0, explicitTolerance)
+    : Math.max(35, Number(nearest.halfWidthMetres) || 45);
+  if (nearest.distance <= riverTolerance) return "both";
   return nearest.cross >= 0 ? "north" : "south";
 }
 
@@ -565,7 +567,9 @@ export function evaluateStationPossibilities({
  * it, green only when every ready answer allows it, and amber when unresolved
  * data prevents a definite result. This is a visual evidence overlay rather
  * than a claim that a mobile hider stayed at one fixed point. In `endgame`
- * mode all locked answers are intersected because the hiding spot is fixed.
+ * mode station-level answers and fixed-spot answers are hard exclusions. In
+ * `history` mode mobile area answers are evaluated separately so the Endgame
+ * map can retain them as clearly labelled earlier snapshots.
  */
 export function evaluateZoneAreaMask({
   station,
@@ -580,7 +584,15 @@ export function evaluateZoneAreaMask({
   const context = { spatialFeatures };
   let selectedConstraints;
   if (mode === "endgame") {
-    selectedConstraints = constraints.filter((constraint) => constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED && (AREA_TYPES.has(constraint.type) || STATION_LEVEL_TYPES.has(constraint.type)));
+    selectedConstraints = constraints.filter((constraint) =>
+      STATION_LEVEL_TYPES.has(constraint.type)
+      || (constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED && AREA_TYPES.has(constraint.type))
+    );
+  } else if (mode === "history") {
+    selectedConstraints = constraints.filter((constraint) =>
+      constraint.movementMode !== DEDUCTION_MOVEMENT.LOCKED
+      && AREA_TYPES.has(constraint.type)
+    );
   } else if (mode === "overlay") {
     selectedConstraints = constraints.filter((constraint) => AREA_TYPES.has(constraint.type) || STATION_LEVEL_TYPES.has(constraint.type));
   } else {
@@ -700,7 +712,7 @@ function automaticConstraint(question) {
   }
   if (input.type === DEDUCTION_TOOL_TYPES.THAMES && ["yes", "no"].includes(answer)) {
     if (!["north", "south", "both"].includes(input.seekerSide)) return null;
-    return { ...base, type: input.type, seekerSide: input.seekerSide, answer };
+    return { ...base, type: input.type, seeker: finitePoint(input.seeker), seekerSide: input.seekerSide, answer };
   }
   if ([DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH, DEDUCTION_TOOL_TYPES.REGION_MATCH].includes(input.type) && ["yes", "no"].includes(answer)) {
     const seeker = finitePoint(input.seeker);

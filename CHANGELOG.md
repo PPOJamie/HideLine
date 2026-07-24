@@ -2,20 +2,33 @@
 
 All notable changes to HideLine are documented here.
 
-## 2.0.0 — Simplified game-day interface
+## 2.1.0 — Thames, Endgame carry-forward and map coordinate picker
 
-- Reduced the primary navigation to **Game**, **Questions** and **Map**.
-- Rebuilt the Game screen around the live timer, current role, one recommended next action and four concise shortcuts.
-- Moved cards, traps, transit, scoring and private station controls into one collapsed **Game kit**.
-- Rebuilt the Questions screen around the active question, category search and a collapsed history.
-- Made the combined all-answer deduction overlay the only normal seeker-map workflow; technical layer selection and manual builders are no longer exposed in the main interface.
-- Kept one dedicated Endgame view with a clear **Back to all stations** control.
-- Reduced the map to three understandable choices: **Find hiders**, **My zone** and **Official map**.
-- Collapsed map-data import, answer auditing, Connected Mode credentials and custom timing controls until they are needed.
-- Added role-aware private controls so connected seeker devices do not display the other team's station or card manager.
-- Added saved-state migration from the former Tools view and older deduction-map modes.
-- Added mobile layout refinements so the combined map appears within the first screen rather than below several configuration panels.
-- Updated install metadata, screenshots, tests, documentation and the service-worker cache. No Supabase migration is required.
+- Replaced the coarse Thames guide with 57 hand-checked control points, densified to roughly 35 m spacing and given a variable-width planning corridor through the major London crossings and intervening bends.
+- Stopped drawing an approximate river line over the interactive OpenStreetMap water polygon, preventing the visual guide from appearing to run onto land at close zoom.
+- Carried every earlier linked answer into the Endgame view automatically.
+- Kept station-level facts and fixed-spot Endgame answers as hard exclusions while showing pre-Endgame mobile-location answers as blue historical hatching.
+- Added clear Endgame labels explaining that earlier clues remain useful but do not prove the hider's current fixed position after they were allowed to move.
+- Added **Pick coordinates from map** to every question workflow that requires a seeker/start/end/reference coordinate.
+- Added a dedicated tap-and-drag map dialog, device-GPS shortcut, offline vector fallback and automatic Google Maps pin filling.
+- Made Thames-side Matching derive north, south or the bridge/tunnel corridor directly from the selected map pin.
+- Added regression tests for the western Thames bends, Endgame historical masks, coordinate-picker controls and the standalone picker dialog.
+- Updated the service-worker cache and app version. No Supabase migration is required.
+
+## 2.0.0 — Simple Game Day
+
+- Replaced the layer-heavy interface with four primary tabs: Game, Questions, Map and More.
+- Rebuilt the Game screen around the current timer, player role and the next useful action.
+- Rebuilt the Questions screen to surface one pending question at a time and keep long guidance/history collapsed.
+- Made the Live Deduction Map the default map and removed normal-play answer-layer switching.
+- Combined all usable exclusions automatically across every visible 500 m station circle.
+- Kept pre-Endgame station calculations movement-aware while preserving fixed-point intersections in Endgame.
+- Simplified Endgame to one suspected station circle with a prominent Back to all stations control.
+- Kept score, cards, time traps and the station list under a single More screen.
+- Moved KML/KMZ/GeoJSON import and manual geometry into a collapsed Map not matching? section.
+- Added role-focused Quick Rules and removed schedule/checklist clutter from the main workflow.
+- Preserved Local Mode, Connected Mode, team privacy, offline support and all 55 linked handbook questions.
+- Updated install metadata and the service-worker cache. No Supabase migration is required from version 1.1 or later.
 
 ## 1.3.0 — Combined exclusion overlay and Endgame reset
 

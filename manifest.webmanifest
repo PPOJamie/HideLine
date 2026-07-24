@@ -2,7 +2,7 @@
   "id": "./",
   "name": "HideLine - London Hide + Seek Companion",
   "short_name": "HideLine",
-  "description": "A simple game-day companion for London transit hide-and-seek: timer, questions, live deduction map and optional team sync.",
+  "description": "A simple London hide-and-seek companion with a live deduction map, carried-forward Endgame clues, map-picked coordinates, timers, scoring and optional team sync.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -34,25 +34,9 @@
       "purpose": "maskable"
     }
   ],
-  "screenshots": [
-    {
-      "src": "./assets/screenshot-simple-mobile.png",
-      "sizes": "390x844",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Simple HideLine deduction map"
-    },
-    {
-      "src": "./assets/screenshot-simple-desktop.png",
-      "sizes": "1440x1000",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "Simple HideLine game dashboard"
-    }
-  ],
   "shortcuts": [
     {
-      "name": "Game",
+      "name": "Game timer",
       "short_name": "Game",
       "url": "./?view=play",
       "icons": [
@@ -74,7 +58,7 @@
       ]
     },
     {
-      "name": "Deduction map",
+      "name": "Live deduction map",
       "short_name": "Map",
       "url": "./?view=map",
       "icons": [
