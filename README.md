@@ -1,13 +1,15 @@
 # HideLine — London Hide + Seek Companion
 
-HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.1.2 keeps the simple game-day design, fixes the Connected Mode join issue, and makes live maps stay responsive while presence and location updates arrive.
+HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.1.3 restores a consistent game-day layout after the Connected Mode performance update, keeps the responsive live-map behaviour, and prevents browsers from mixing old interface files with new styles.
 
 ![Simple HideLine game screen](assets/screenshot-simple-desktop.png)
 
 ![Simple HideLine deduction map on mobile](assets/screenshot-simple-mobile.png)
 
-## What is new in 2.1.2
+## What is new in 2.1.3
 
+- **Interface consistency repair:** the complete set of UI renderers and matching stylesheet are shipped together, preventing compressed text, missing card spacing and unformatted activity rows.
+- **Safer update caching:** versioned entry files and network-first source loading prevent an older UI module being combined with a newer stylesheet.
 - **Responsive Connected Mode maps:** live positions, roster heartbeats and timeline events are applied directly instead of reloading the full game. The deduction map no longer recentres every few seconds.
 - **Smoother panning and zooming:** detailed exclusion masks pause briefly while the map is moving and redraw once at the final view, keeping touch gestures responsive.
 - **View preservation:** meaningful question or deduction updates keep the current map centre and zoom.
@@ -97,7 +99,7 @@ window.HIDELINE_CONFIG = {
 };
 ```
 
-HideLine 2.1.2 requires **no new Supabase migration for map performance**. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
+HideLine 2.1.3 requires **no new Supabase migration for the interface or map-performance repair**. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
 
 ## Privacy model
 

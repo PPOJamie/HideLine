@@ -7,14 +7,11 @@ import { statusTone } from "../services/tfl.js";
 import { icon } from "./icons.js";
 
 const TOOL_TABS = [
-  ["score", "Score", "trophy"],
-  ["cards", "Cards", "card"],
-  ["traps", "Time traps", "trap"],
-  ["stations", "Stations", "station"]
+  ["score", "Score"], ["cards", "Cards"], ["traps", "Time traps"], ["stations", "Stations"], ["status", "TfL status"], ["checklist", "Checklist"]
 ];
 
 function tabs(selected) {
-  return `<div class="simple-more-tabs" role="tablist" aria-label="More tools">${TOOL_TABS.map(([id, label, iconName]) => `<button class="${selected === id ? "active" : ""}" type="button" data-action="tool-tab" data-tool="${id}">${icon(iconName)}<span>${label}</span></button>`).join("")}</div>`;
+  return `<div class="tabs" role="tablist" aria-label="Toolkit section">${TOOL_TABS.map(([id, label]) => `<button class="tab-button ${selected === id ? "active" : ""}" type="button" data-action="tool-tab" data-tool="${id}">${label}</button>`).join("")}</div>`;
 }
 
 function adjustmentRows(score) {
@@ -141,16 +138,12 @@ function renderChecklist(state) {
 }
 
 export function renderToolsView(state) {
-  const selected = ["score", "cards", "traps", "stations", "status"].includes(state.ui.selectedTool) ? state.ui.selectedTool : "score";
+  const selected = state.ui.selectedTool || "score";
   const content = selected === "cards" ? renderCards(state)
     : selected === "traps" ? renderTraps(state)
     : selected === "stations" ? renderStations(state)
     : selected === "status" ? renderStatus(state)
+    : selected === "checklist" ? renderChecklist(state)
     : renderScore(state);
-  return `<div class="view-stack simple-more-view">
-    <section class="simple-more-heading"><div><p class="eyebrow">Round extras</p><h2>Only open these when you need them</h2><p>Scoring, cards, traps and station selection are kept away from the main game screen.</p></div><button class="button button-soft" type="button" data-action="navigate" data-view="rules">${icon("rules")} Quick rules</button></section>
-    ${selected === "status" ? `<div class="button-row"><button class="button button-soft button-small" type="button" data-action="tool-tab" data-tool="score">${icon("undo")} Back to round tools</button></div>` : tabs(selected)}
-    ${content}
-    <section class="card card-pad simple-useful-links"><div><p class="eyebrow">Before choosing a route</p><h2>Travel checks</h2><p>Check closures and disruptions before relying on a station.</p></div><div class="button-row"><button class="button button-soft" type="button" data-action="tool-tab" data-tool="status">${icon("train")} TfL status</button><a class="button button-soft" href="https://www.nationalrail.co.uk/status-and-disruptions/" target="_blank" rel="noopener">${icon("external")} National Rail</a></div></section>
-  </div>`;
+  return `<div class="view-stack">${tabs(selected)}${content}</div>`;
 }

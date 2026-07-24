@@ -1443,3 +1443,165 @@ select[multiple] option { padding: 7px 8px; border-radius: 7px; }
   .coordinate-picker-readout span, .coordinate-picker-fallback p { color: #98aebb; }
   .coordinate-picker-map { border-color: #27465c; }
 }
+
+/* HideLine 2.1.3 upgrade compatibility
+   Keeps the game screen readable while an installed PWA replaces an older
+   cached 2.0 UI module. The current renderer uses the newer simple-stat and
+   simple-list components, but these scoped rules prevent mixed-version assets
+   from collapsing labels, values and activity rows together. */
+.simple-snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.simple-snapshot {
+  min-width: 0;
+  padding: 17px 18px;
+  display: grid;
+  gap: 3px;
+}
+.simple-snapshot > span {
+  color: var(--ink-600);
+  font-size: .72rem;
+  font-weight: 800;
+}
+.simple-snapshot > strong {
+  display: block;
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  letter-spacing: -.04em;
+  line-height: 1.08;
+}
+.simple-snapshot > small {
+  display: block;
+  color: var(--ink-500);
+  line-height: 1.35;
+}
+.simple-game-grid {
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, .75fr);
+  align-items: start;
+}
+.simple-next-card h2 { margin-top: 3px; }
+.simple-action-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 18px;
+}
+.simple-action-grid .button { min-height: 48px; }
+.simple-team-summary .simple-team-row {
+  display: block;
+  padding: 13px 14px;
+}
+.simple-team-summary .simple-team-row > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.simple-team-summary .simple-team-row > small {
+  display: block;
+  margin-top: 6px;
+  overflow: visible;
+  white-space: normal;
+  color: var(--ink-600);
+}
+.simple-event-list { display: grid; }
+.simple-event-list article {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ink-100);
+}
+.simple-event-list article:last-child { border-bottom: 0; }
+.simple-event-list article > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.simple-event-list strong,
+.simple-event-list small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.simple-event-list small {
+  color: var(--ink-600);
+  line-height: 1.4;
+}
+.simple-event-list time {
+  flex: 0 0 auto;
+  color: var(--ink-500);
+  font-size: .68rem;
+  white-space: nowrap;
+}
+.simple-chat { margin-top: 12px; }
+.simple-empty { min-height: 145px; }
+.simple-help-card .button { margin-top: 8px; }
+.simple-welcome {
+  min-height: 330px;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: center;
+}
+.simple-welcome > div { max-width: 760px; }
+.simple-welcome h2 {
+  margin: 7px 0 12px;
+  font-size: clamp(2.2rem, 6vw, 4.5rem);
+  letter-spacing: -.055em;
+  line-height: .98;
+}
+.simple-welcome p {
+  max-width: 62ch;
+  color: rgba(255, 255, 255, .75);
+  font-size: 1.05rem;
+  line-height: 1.65;
+}
+.simple-start-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.simple-start-steps article {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 18px;
+}
+.simple-start-steps article > span {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: white;
+  background: var(--ink-900);
+  font-weight: 900;
+}
+.simple-start-steps strong { display: block; }
+.simple-start-steps p {
+  margin: 4px 0 0;
+  color: var(--ink-600);
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 1080px) {
+  .simple-game-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .simple-snapshot-grid,
+  .simple-start-steps { grid-template-columns: 1fr; }
+  .simple-action-grid { width: 100%; }
+  .simple-action-grid .button { flex: 1 1 100%; }
+  .simple-welcome { min-height: 260px; }
+  .simple-welcome h2 { font-size: clamp(2rem, 12vw, 3.2rem); }
+  .simple-event-list article { align-items: flex-start; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .simple-team-summary .simple-team-row { background: #10283b; border-color: #27465c; }
+}

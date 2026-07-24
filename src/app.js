@@ -2218,7 +2218,12 @@ class HideLineApp {
 
   async registerServiceWorker() {
     if (!("serviceWorker" in navigator) || location.protocol === "file:") return;
-    try { await navigator.serviceWorker.register("./service-worker.js", { scope: "./" }); } catch (error) { console.warn("Service worker registration failed", error); }
+    try {
+      const registration = await navigator.serviceWorker.register("./service-worker.js", { scope: "./", updateViaCache: "none" });
+      registration.update().catch(() => {});
+    } catch (error) {
+      console.warn("Service worker registration failed", error);
+    }
   }
 }
 

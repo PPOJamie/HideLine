@@ -1,5 +1,5 @@
-const CACHE_VERSION = "hideline-shell-v2.1.2";
-const RUNTIME_CACHE = "hideline-runtime-v2.1.2";
+const CACHE_VERSION = "hideline-shell-v2.1.3";
+const RUNTIME_CACHE = "hideline-runtime-v2.1.3";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -11,8 +11,8 @@ const APP_SHELL = [
   "./assets/icon-512.png",
   "./assets/icon-maskable-512.png",
   "./assets/apple-touch-icon.png",
-  "./src/styles.css",
-  "./src/app.js",
+  "./src/styles.css?v=2.1.3",
+  "./src/app.js?v=2.1.3",
   "./src/core/constants.js",
   "./src/core/format.js",
   "./src/core/time.js",
@@ -47,8 +47,37 @@ const APP_SHELL = [
   "./src/ui/modals.js"
 ];
 
+async function putIfCacheable(cache, request, response) {
+  if (response && (response.ok || response.type === "opaque")) {
+    await cache.put(request, response.clone());
+  }
+  return response;
+}
+
+async function networkFirst(request, cacheName = CACHE_VERSION) {
+  const cache = await caches.open(cacheName);
+  try {
+    const response = await fetch(request, { cache: "no-store" });
+    return putIfCacheable(cache, request, response);
+  } catch {
+    return (await cache.match(request)) || (await cache.match(request, { ignoreSearch: true }));
+  }
+}
+
+async function cacheFirst(request, cacheName = CACHE_VERSION) {
+  const cache = await caches.open(cacheName);
+  const cached = (await cache.match(request)) || (await cache.match(request, { ignoreSearch: true }));
+  if (cached) return cached;
+  const response = await fetch(request);
+  return putIfCacheable(cache, request, response);
+}
+
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_VERSION).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches.open(CACHE_VERSION)
+      .then((cache) => cache.addAll(APP_SHELL))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (event) => {
@@ -63,53 +92,31 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
+
   if (url.origin !== self.location.origin) {
     const cacheableLeaflet = url.hostname === "unpkg.com" && url.pathname.includes("/leaflet@1.9.4/dist/");
-    if (cacheableLeaflet) {
-      event.respondWith(
-        caches.open(RUNTIME_CACHE).then(async (cache) => {
-          const cached = await cache.match(request);
-          if (cached) return cached;
-          const response = await fetch(request);
-          if (response.ok || response.type === "opaque") await cache.put(request, response.clone());
-          return response;
-        })
-      );
-    }
+    if (cacheableLeaflet) event.respondWith(cacheFirst(request, RUNTIME_CACHE));
     return;
   }
 
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_VERSION).then((cache) => cache.put("./index.html", copy));
-          return response;
-        })
-        .catch(async () => (await caches.match("./index.html")) || caches.match("./offline.html"))
+      networkFirst(request).then((response) => response || caches.match("./offline.html"))
     );
     return;
   }
 
-  if (url.pathname.endsWith("/config.js")) {
-    event.respondWith(fetch(request).then((response) => {
-      if (response.ok) {
-        const copy = response.clone();
-        caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
-      }
-      return response;
-    }).catch(() => caches.match(request)));
+  const isVersionSensitive =
+    url.pathname.endsWith("/config.js") ||
+    url.pathname.endsWith("/manifest.webmanifest") ||
+    url.pathname.includes("/src/") ||
+    url.pathname.endsWith(".js") ||
+    url.pathname.endsWith(".css");
+
+  if (isVersionSensitive) {
+    event.respondWith(networkFirst(request));
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-      if (response.ok) {
-        const copy = response.clone();
-        caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
-      }
-      return response;
-    }))
-  );
+  event.respondWith(cacheFirst(request));
 });

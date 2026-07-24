@@ -34,9 +34,25 @@
       "purpose": "maskable"
     }
   ],
+  "screenshots": [
+    {
+      "src": "./assets/screenshot-simple-mobile.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Simple HideLine deduction map"
+    },
+    {
+      "src": "./assets/screenshot-simple-desktop.png",
+      "sizes": "1440x1000",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Simple HideLine game dashboard"
+    }
+  ],
   "shortcuts": [
     {
-      "name": "Game timer",
+      "name": "Game",
       "short_name": "Game",
       "url": "./?view=play",
       "icons": [
@@ -58,7 +74,7 @@
       ]
     },
     {
-      "name": "Live deduction map",
+      "name": "Deduction map",
       "short_name": "Map",
       "url": "./?view=map",
       "icons": [

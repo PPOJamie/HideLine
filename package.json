@@ -1,8 +1,8 @@
 {
   "name": "hideline-london-companion",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "private": true,
-  "description": "A simple, installable London hide-and-seek companion with responsive Connected Mode maps and real-time multiplayer sync.",
+  "description": "A simple, installable London hide-and-seek companion with responsive Connected Mode maps, consistent game-day styling and real-time multiplayer sync.",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev-server.mjs",

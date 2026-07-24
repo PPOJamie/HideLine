@@ -2,6 +2,15 @@
 
 All notable changes to HideLine are documented here.
 
+## 2.1.3 — Interface consistency and cache repair
+
+- Restored the intended spacing, typography, card layout and activity timeline after the 2.1.2 performance update.
+- Packaged every UI renderer together with the matching stylesheet so partial GitHub uploads cannot leave incompatible interface versions behind.
+- Added versioned entry-file URLs and network-first loading for JavaScript and CSS to prevent service-worker cache mixing.
+- Kept the Connected Mode map optimisations from 2.1.2, including direct presence/location updates and retained map viewport.
+- Added UI consistency and cache-strategy regression tests.
+- Updated the PWA cache to 2.1.3. No Supabase migration is required.
+
 ## 2.1.2 — Connected Mode map performance
 
 - Stopped Supabase presence heartbeats from triggering full database hydration and complete map reconstruction.
