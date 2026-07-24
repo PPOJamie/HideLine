@@ -16,6 +16,8 @@ let deductionMapInstance;
 let deductionLayerGroups;
 let deductionMaskLayer;
 let deductionPick = null;
+let deductionViewportCache = null;
+let activeDeductionViewportKey = null;
 let coordinatePickerMapInstance;
 let coordinatePickerMarker;
 let coordinatePickerFallback = null;
@@ -554,7 +556,7 @@ function attachAreaMaskCanvas(map, plans) {
     frame = 0;
     if (!map._loaded || !canvas.isConnected) return;
     const size = map.getSize();
-    const ratio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const ratio = Math.max(1, Math.min(1.5, window.devicePixelRatio || 1));
     canvas.width = Math.max(1, Math.round(size.x * ratio));
     canvas.height = Math.max(1, Math.round(size.y * ratio));
     canvas.style.width = `${size.x}px`;
@@ -585,16 +587,28 @@ function attachAreaMaskCanvas(map, plans) {
   };
 
   const schedule = () => {
-    if (!frame) frame = window.requestAnimationFrame(redraw);
+    if (!frame) frame = window.requestAnimationFrame(() => {
+      redraw();
+      canvas.classList.remove("is-map-moving");
+    });
   };
-  map.on("move zoom resize viewreset", schedule);
+  const hideDuringMotion = () => {
+    canvas.classList.add("is-map-moving");
+  };
+  const finishMotion = () => schedule();
+  // Drawing thousands of mask cells on every pan frame made touch dragging
+  // sluggish. Hide the custom mask while the map is moving and redraw once at
+  // the final viewport instead. Leaflet's native markers and tiles remain fluid.
+  map.on("movestart zoomstart", hideDuringMotion);
+  map.on("moveend zoomend resize", finishMotion);
   redraw();
   return {
     canvas,
     redraw: schedule,
     remove() {
       if (frame) window.cancelAnimationFrame(frame);
-      map.off("move zoom resize viewreset", schedule);
+      map.off("movestart zoomstart", hideDuringMotion);
+      map.off("moveend zoomend resize", finishMotion);
       canvas.remove();
     }
   };
@@ -849,7 +863,9 @@ export async function renderDeductionMap({
 } = {}) {
   const container = document.getElementById(containerId);
   if (!container) return null;
+  const viewportKey = [displayMode, endgameStation?.id || "all", maskScope, selectedStationId || "none"].join(":");
   destroyDeductionMap();
+  const preservedViewport = deductionViewportCache?.key === viewportKey ? deductionViewportCache : null;
   let L;
   try {
     L = await loadLeaflet();
@@ -929,8 +945,11 @@ export async function renderDeductionMap({
   const selected = endgameMode
     ? endgameStation
     : results.find((result) => result.id === selectedStationId);
-  if (selected) deductionMapInstance.setView([Number(selected.lat), Number(selected.lng)], endgameMode ? 16 : maskScope === "selected" && displayMode === DEDUCTION_MAP_MODES.ANSWER ? 16 : 15, { animate: false });
+  if (preservedViewport?.centre && Number.isFinite(preservedViewport.zoom)) {
+    deductionMapInstance.setView(preservedViewport.centre, preservedViewport.zoom, { animate: false });
+  } else if (selected) deductionMapInstance.setView([Number(selected.lat), Number(selected.lng)], endgameMode ? 16 : maskScope === "selected" && displayMode === DEDUCTION_MAP_MODES.ANSWER ? 16 : 15, { animate: false });
   else if (bounds.length) deductionMapInstance.fitBounds(bounds, { padding: [28, 28], maxZoom: endgameMode ? 16 : 13, animate: false });
+  activeDeductionViewportKey = viewportKey;
   setTimeout(() => {
     deductionMapInstance?.invalidateSize();
     deductionMaskLayer?.redraw?.();
@@ -957,11 +976,20 @@ export function focusDeductionStation(station) {
 }
 
 export function destroyDeductionMap() {
+  if (deductionMapInstance && activeDeductionViewportKey) {
+    try {
+      const centre = deductionMapInstance.getCenter();
+      deductionViewportCache = { key: activeDeductionViewportKey, centre: [centre.lat, centre.lng], zoom: deductionMapInstance.getZoom() };
+    } catch {
+      // The map container may already have been replaced during an app render.
+    }
+  }
   deductionMaskLayer?.remove?.();
   deductionMaskLayer = null;
   deductionMapInstance?.remove();
   deductionMapInstance = null;
   deductionLayerGroups = null;
+  activeDeductionViewportKey = null;
 }
 
 function escapeMapText(value) {

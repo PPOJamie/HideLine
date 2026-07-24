@@ -60,6 +60,8 @@ class HideLineApp {
     this.coordinatePickerRenderToken = 0;
     this.deferredInstallPrompt = null;
     this.remoteRefreshTimer = null;
+    this.pendingRemoteTables = new Set();
+    this.remoteRefreshInFlight = false;
     this.renderTimer = null;
     this.locationUploadAt = 0;
     this.transitionLock = false;
@@ -69,10 +71,13 @@ class HideLineApp {
 
   async init() {
     this.bindGlobalEvents();
-    this.store.addEventListener("change", () => this.render());
-    this.sync.addEventListener("remote-change", () => this.scheduleRemoteRefresh());
-    this.sync.addEventListener("status", (event) => this.store.patch("connection.status", event.detail.status));
-    this.sync.addEventListener("presence", () => this.scheduleRemoteRefresh());
+    this.store.addEventListener("change", (event) => this.handleStoreChange(event));
+    this.sync.addEventListener("remote-change", (event) => this.handleRemoteChange(event.detail));
+    this.sync.addEventListener("status", (event) => this.store.patch("connection.status", event.detail.status, { source: "connection", persist: false }));
+    // Presence sync is intentionally not followed by a full database hydration.
+    // Supabase can emit presence syncs during websocket heartbeats; rebuilding the
+    // whole map for those events made Connected Mode appear to refresh repeatedly.
+    this.sync.addEventListener("presence", () => this.updateConnectionChrome());
     this.location.addEventListener("position", (event) => this.handlePosition(event.detail));
     this.location.addEventListener("error", (event) => this.handleLocationError(event.detail));
     this.render();
@@ -110,9 +115,216 @@ class HideLineApp {
       this.toast("HideLine was installed.", "success");
     });
     window.addEventListener("online", () => {
-      if (this.store.get().connection.mode === "connected") this.store.patch("connection.status", "online");
+      if (this.store.get().connection.mode === "connected") this.store.patch("connection.status", "online", { source: "connection", persist: false });
     });
-    window.addEventListener("offline", () => this.store.patch("connection.status", "offline"));
+    window.addEventListener("offline", () => this.store.patch("connection.status", "offline", { source: "connection", persist: false }));
+  }
+
+  handleStoreChange(event) {
+    const source = event?.detail?.source || "local";
+    const state = this.store.get();
+    const noFullRender = new Set(["connection", "location", "remote-position", "presence"]);
+    if (noFullRender.has(source)) {
+      this.updateConnectionChrome();
+      if (state.ui.view === VIEWS.MAP) {
+        const connectedHider = state.connection.mode === "connected" && state.game && state.profile.team === state.game.hiderTeam;
+        const effectiveMapMode = connectedHider && state.ui.mapMode === "deduction" ? "zone" : state.ui.mapMode;
+        if (effectiveMapMode === "zone") {
+          updateZoneMap({ station: this.stationMapObject(), positions: this.mapPositions(), radiusMetres: DEFAULT_DURATIONS.hidingZoneRadiusMetres });
+        }
+      }
+      return;
+    }
+    if (state.ui.view === VIEWS.MAP && ["remote-member", "remote-event", "remote-game", "remote-team"].includes(source)) {
+      this.updateConnectionChrome();
+      return;
+    }
+    this.render();
+  }
+
+  updateConnectionChrome() {
+    const state = this.store.get();
+    const card = this.root.querySelector(".compact-connection");
+    if (!card) return;
+    const strong = card.querySelector("strong");
+    const small = card.querySelector("small");
+    const dot = card.querySelector(".connection-dot");
+    const connected = state.connection.mode === "connected" && state.connection.status === "online";
+    if (strong) strong.textContent = connected ? `Room ${state.connection.roomCode || ""}` : state.game ? "Saved on this device" : "Ready to start";
+    if (small) small.textContent = connected ? "Live updates are shared." : state.game ? "Connect other phones from Settings." : "Create or join a game.";
+    if (dot) {
+      dot.className = "connection-dot";
+      if (["online", "syncing", "error"].includes(state.connection.status)) dot.classList.add(state.connection.status);
+    }
+  }
+
+  handleRemoteChange({ table, payload } = {}) {
+    if (!table) return;
+    if (table === "positions") {
+      this.applyRemotePosition(payload);
+      return;
+    }
+    if (table === "game_members") {
+      this.applyRemoteMember(payload);
+      return;
+    }
+    if (table === "game_events") {
+      this.applyRemoteEvent(payload);
+      return;
+    }
+    if (table === "games") {
+      this.applyRemoteGame(payload);
+      return;
+    }
+    if (table === "team_states") {
+      this.applyRemoteTeamState(payload);
+      return;
+    }
+    this.scheduleRemoteRefresh(table);
+  }
+
+  applyRemoteGame(payload = {}) {
+    const eventType = String(payload.eventType || payload.event || "").toUpperCase();
+    const row = payload.new;
+    if (eventType === "DELETE" || !row?.id || !row.state) {
+      this.scheduleRemoteRefresh("games");
+      return;
+    }
+    const current = this.store.get();
+    const remote = row.state || {};
+    const previousMapSignature = JSON.stringify({
+      round: current.game?.round,
+      phase: current.game?.phase,
+      hiderTeam: current.game?.hiderTeam,
+      questions: current.questions || []
+    });
+    const nextQuestions = remote.questions || current.questions || [];
+    const nextMapSignature = JSON.stringify({
+      round: remote.round ?? current.game?.round,
+      phase: remote.phase ?? current.game?.phase,
+      hiderTeam: remote.hiderTeam ?? current.game?.hiderTeam,
+      questions: nextQuestions
+    });
+    const source = previousMapSignature === nextMapSignature ? "remote-game" : "remote-game-map";
+    this.store.set((draft) => {
+      const base = draft.game || createGameState({ name: row.name, code: row.join_code, hostId: row.created_by, mode: "connected" });
+      draft.game = {
+        ...base,
+        ...remote,
+        id: row.id,
+        code: row.join_code,
+        name: remote.name || row.name,
+        mode: "connected",
+        hostId: row.created_by,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        version: row.version,
+        teams: { ...base.teams, ...(remote.teams || {}) },
+        timers: { ...base.timers, ...(remote.timers || {}) },
+        transit: { ...base.transit, ...(remote.transit || {}) },
+        scoreByRound: { ...base.scoreByRound, ...(remote.scoreByRound || {}) },
+        settings: { ...base.settings, ...(remote.settings || {}) },
+        members: base.members || []
+      };
+      draft.questions = nextQuestions;
+      draft.connection.lastSyncedAt = toIso();
+      draft.connection.status = "online";
+      draft.connection.error = null;
+      return draft;
+    }, { source });
+  }
+
+  applyRemoteTeamState(payload = {}) {
+    const eventType = String(payload.eventType || payload.event || "").toUpperCase();
+    const row = payload.new;
+    if (eventType === "DELETE" || !row?.state) {
+      this.scheduleRemoteRefresh("team_states");
+      return;
+    }
+    const current = this.store.get().privateTeamState || {};
+    const next = row.state || {};
+    const previousMapSignature = JSON.stringify({
+      deductionByRound: current.deductionByRound || {},
+      spatialData: current.spatialData || {},
+      stationId: current.stationId || null,
+      stationCoords: current.stationCoords || null
+    });
+    const nextMapSignature = JSON.stringify({
+      deductionByRound: next.deductionByRound || {},
+      spatialData: next.spatialData || {},
+      stationId: next.stationId || null,
+      stationCoords: next.stationCoords || null
+    });
+    const source = previousMapSignature === nextMapSignature ? "remote-team" : "remote-team-map";
+    this.store.set((draft) => {
+      draft.privateTeamState = {
+        stationId: null,
+        stationName: null,
+        stationCoords: null,
+        hidingSpotNote: "",
+        cards: [],
+        handLimit: DEFAULT_DURATIONS.handLimit,
+        privateNotes: "",
+        deductionByRound: {},
+        spatialData: { version: 1, sourceName: "No map data imported", importedAt: null, features: [] },
+        ...next
+      };
+      draft.connection.lastSyncedAt = toIso();
+      draft.connection.status = "online";
+      draft.connection.error = null;
+      return draft;
+    }, { source });
+  }
+
+  applyRemotePosition(payload = {}) {
+    const eventType = String(payload.eventType || payload.event || "").toUpperCase();
+    const row = eventType === "DELETE" ? payload.old : payload.new;
+    const userId = row?.user_id;
+    if (!userId || userId === this.sync.session?.user?.id) return;
+    this.store.set((draft) => {
+      const remaining = (draft.positions || []).filter((position) => (position.userId || position.user_id) !== userId);
+      draft.positions = eventType === "DELETE" ? remaining : [...remaining, row];
+      return draft;
+    }, { source: "remote-position", persist: false });
+    this.maybePromptEndgame();
+  }
+
+  applyRemoteMember(payload = {}) {
+    const eventType = String(payload.eventType || payload.event || "").toUpperCase();
+    const row = eventType === "DELETE" ? payload.old : payload.new;
+    const userId = row?.user_id;
+    if (!userId || !this.store.get().game) return;
+    this.store.set((draft) => {
+      const remaining = (draft.game?.members || []).filter((member) => member.userId !== userId);
+      if (eventType === "DELETE") draft.game.members = remaining;
+      else {
+        const member = {
+          userId: row.user_id,
+          displayName: row.display_name,
+          team: row.team,
+          isHost: row.is_host,
+          joinedAt: row.joined_at,
+          lastSeen: row.last_seen
+        };
+        draft.game.members = [...remaining, member].sort((a, b) => String(a.joinedAt || "").localeCompare(String(b.joinedAt || "")));
+      }
+      return draft;
+    }, { source: "remote-member", persist: false });
+  }
+
+  applyRemoteEvent(payload = {}) {
+    const eventType = String(payload.eventType || payload.event || "").toUpperCase();
+    const row = eventType === "DELETE" ? payload.old : payload.new;
+    if (!row?.id) return;
+    this.store.set((draft) => {
+      const remaining = (draft.events || []).filter((event) => event.id !== row.id);
+      if (eventType === "DELETE") draft.events = remaining;
+      else {
+        const event = { id: row.id, type: row.event_type, payload: row.payload || {}, team: row.team, visibility: row.visibility, createdAt: row.created_at, createdBy: row.created_by };
+        draft.events = [event, ...remaining].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))).slice(0, 300);
+      }
+      return draft;
+    }, { source: "remote-event" });
   }
 
   render({ preserveFocus = true } = {}) {
@@ -136,7 +348,9 @@ class HideLineApp {
 
   afterRender() {
     const state = this.store.get();
-    if (state.ui.view === VIEWS.MAP && state.ui.mapMode === "zone") {
+    const connectedHider = state.connection.mode === "connected" && state.game && state.profile.team === state.game.hiderTeam;
+    const effectiveMapMode = connectedHider && state.ui.mapMode === "deduction" ? "zone" : state.ui.mapMode;
+    if (state.ui.view === VIEWS.MAP && effectiveMapMode === "zone") {
       destroyDeductionMap();
       const station = this.stationMapObject();
       const positions = this.mapPositions();
@@ -146,7 +360,7 @@ class HideLineApp {
       });
       return;
     }
-    if (state.ui.view === VIEWS.MAP && state.ui.mapMode === "deduction") {
+    if (state.ui.view === VIEWS.MAP && effectiveMapMode === "deduction") {
       destroyZoneMap();
       const model = buildDeductionViewModel(state);
       if (!model.canView) {
@@ -156,14 +370,14 @@ class HideLineApp {
       renderDeductionMap({
         results: model.results,
         constraints: model.constraints,
-        showEliminated: true,
-        showZones: true,
-        showAreaMask: true,
-        displayMode: model.displayMode,
-        maskScope: model.displayMode === DEDUCTION_MAP_MODES.ENDGAME ? "selected" : "all",
-        activeConstraint: null,
+        showEliminated: model.roundState.showEliminated,
+        showZones: model.roundState.showZones,
+        showAreaMask: model.roundState.showAreaMask,
+        displayMode: model.roundState.mapDisplayMode,
+        maskScope: model.roundState.maskScope,
+        activeConstraint: model.activeAreaConstraint,
         answerConstraints: model.answerConstraints,
-        answerSelectionAll: true,
+        answerSelectionAll: model.areaSelectionAll,
         endgameStation: model.endgameStation,
         spatialFeatures: model.spatialData.features,
         selectedStationId: state.ui.deductionSelectedStationId || null,
@@ -284,10 +498,8 @@ class HideLineApp {
     try {
       switch (action) {
         case "navigate": this.store.patch("ui.view", button.dataset.view); this.updateUrlView(button.dataset.view); break;
-        case "navigate-tool": this.store.patch("ui.selectedTool", button.dataset.tool || "score"); this.store.patch("ui.view", VIEWS.TOOLS); this.updateUrlView(VIEWS.TOOLS); break;
-        case "navigate-map-mode": cancelDeductionMapPick(); this.store.patch("ui.mapMode", button.dataset.mode || "deduction"); this.store.patch("ui.view", VIEWS.MAP); this.updateUrlView(VIEWS.MAP); break;
-        case "navigate-deduction-map": cancelDeductionMapPick(); this.store.patch("ui.mapMode", "deduction"); this.store.patch("ui.view", VIEWS.MAP); this.updateUrlView(VIEWS.MAP); if (this.store.get().game?.phase === PHASES.ENDGAME) await this.setDeductionMapDisplay(DEDUCTION_MAP_MODES.ENDGAME); else await this.showAllDeductionConstraints(); break;
         case "open-modal": this.openModal(button.dataset.modal); break;
+        case "open-game-kit": this.openGameKit(); break;
         case "close-modal": this.closeModal(); break;
         case "dismiss-toast": button.closest(".toast")?.remove(); break;
         case "install-app": await this.installApp(); break;
@@ -437,6 +649,13 @@ class HideLineApp {
     history.replaceState({}, "", url);
   }
 
+  openGameKit() {
+    const kit = document.querySelector("details.game-kit");
+    if (!kit) return;
+    kit.open = true;
+    kit.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   async installApp() {
     if (!this.deferredInstallPrompt) return this.toast("Use your browser menu and choose Add to Home Screen.", "warning");
     await this.deferredInstallPrompt.prompt();
@@ -450,7 +669,7 @@ class HideLineApp {
     const gameName = String(data.gameName || "London Hide + Seek").trim();
     if (mode === "connected") {
       await this.saveConnectionConfig(data.supabaseUrl, data.supabaseAnonKey);
-      this.store.patch("connection.status", "syncing");
+      this.store.patch("connection.status", "syncing", { source: "connection", persist: false });
       await this.sync.connect(data.supabaseUrl, data.supabaseAnonKey);
       const hydrated = await this.sync.createGame({ gameName, displayName: this.store.get().profile.name, team: this.store.get().profile.team });
       this.hydrateRemote(hydrated);
@@ -482,7 +701,7 @@ class HideLineApp {
 
   async joinGame(data) {
     await this.saveConnectionConfig(data.supabaseUrl, data.supabaseAnonKey);
-    this.store.patch("connection.status", "syncing");
+    this.store.patch("connection.status", "syncing", { source: "connection", persist: false });
     await this.sync.connect(data.supabaseUrl, data.supabaseAnonKey);
     const hydrated = await this.sync.joinGame({ code: data.code, displayName: this.store.get().profile.name, team: data.team || this.store.get().profile.team });
     this.hydrateRemote(hydrated);
@@ -518,19 +737,19 @@ class HideLineApp {
     const state = this.store.get();
     if (state.connection.mode !== "connected" || !state.connection.gameId || !state.connection.supabaseUrl || !state.connection.supabaseAnonKey) return;
     try {
-      this.store.patch("connection.status", "syncing");
+      this.store.patch("connection.status", "syncing", { source: "connection", persist: false });
       await this.sync.connect(state.connection.supabaseUrl, state.connection.supabaseAnonKey);
       this.sync.gameId = state.connection.gameId;
       const hydrated = await this.sync.hydrate(state.connection.gameId);
       await this.sync.subscribe(state.connection.gameId);
       this.hydrateRemote(hydrated);
-      this.store.patch("connection.status", "online");
+      this.store.patch("connection.status", "online", { source: "connection", persist: false });
     } catch (error) {
       this.store.set((draft) => {
         draft.connection.status = navigator.onLine ? "error" : "offline";
         draft.connection.error = error.message;
         return draft;
-      });
+      }, { source: "connection", persist: false });
       this.toast(`Connected Mode could not resume: ${error.message}`, "warning");
     }
   }
@@ -597,26 +816,38 @@ class HideLineApp {
     }, { source: "remote" });
   }
 
-  scheduleRemoteRefresh() {
+  scheduleRemoteRefresh(table = "unknown") {
+    this.pendingRemoteTables.add(table);
     clearTimeout(this.remoteRefreshTimer);
-    this.remoteRefreshTimer = setTimeout(async () => {
-      try {
-        const hydrated = await this.sync.hydrate();
-        this.hydrateRemote(hydrated);
-      } catch (error) {
-        this.store.set((draft) => { draft.connection.status = "error"; draft.connection.error = error.message; return draft; });
+    this.remoteRefreshTimer = setTimeout(() => this.flushRemoteRefresh(), 320);
+  }
+
+  async flushRemoteRefresh() {
+    if (this.remoteRefreshInFlight) return;
+    this.remoteRefreshInFlight = true;
+    this.pendingRemoteTables.clear();
+    try {
+      const hydrated = await this.sync.hydrate();
+      this.hydrateRemote(hydrated);
+    } catch (error) {
+      this.store.set((draft) => { draft.connection.status = "error"; draft.connection.error = error.message; return draft; }, { source: "connection", persist: false });
+    } finally {
+      this.remoteRefreshInFlight = false;
+      if (this.pendingRemoteTables.size) {
+        clearTimeout(this.remoteRefreshTimer);
+        this.remoteRefreshTimer = setTimeout(() => this.flushRemoteRefresh(), 320);
       }
-    }, 220);
+    }
   }
 
   async patchGameRemote(patch) {
     if (this.store.get().connection.mode !== "connected") return;
-    this.store.patch("connection.status", "syncing");
+    this.store.patch("connection.status", "syncing", { source: "connection", persist: false });
     try {
       await this.sync.patchGame(patch);
-      this.store.patch("connection.status", "online");
+      this.store.patch("connection.status", "online", { source: "connection", persist: false });
     } catch (error) {
-      this.store.set((draft) => { draft.connection.status = "error"; draft.connection.error = error.message; return draft; });
+      this.store.set((draft) => { draft.connection.status = "error"; draft.connection.error = error.message; return draft; }, { source: "connection", persist: false });
       throw error;
     }
   }
@@ -1115,7 +1346,7 @@ class HideLineApp {
 
   async setDeductionMapDisplay(mode) {
     const allowed = new Set(Object.values(DEDUCTION_MAP_MODES));
-    const nextMode = allowed.has(mode) ? mode : DEDUCTION_MAP_MODES.OVERVIEW;
+    const nextMode = allowed.has(mode) ? mode : DEDUCTION_MAP_MODES.ANSWER;
     if (nextMode !== DEDUCTION_MAP_MODES.ENDGAME) this.store.patch("ui.deductionSelectedStationId", null, { persist: true });
     await this.mutateDeduction((roundState) => {
       roundState.mapDisplayMode = nextMode;
@@ -1159,8 +1390,8 @@ class HideLineApp {
       roundState.areaConstraintId = DEDUCTION_AREA_SELECTION_ALL;
       roundState.endgameStationId = null;
       roundState.maskScope = "all";
-      roundState.showZones = true;
       roundState.showAreaMask = true;
+      roundState.showZones = true;
       roundState.showEliminated = true;
     }, { history: false });
   }
@@ -1424,7 +1655,7 @@ class HideLineApp {
 
   async fillDeductionCoordinates(prefix, button) {
     const form = button.closest("form");
-    if (!form) throw new Error("Open a deduction tool first.");
+    if (!form) throw new Error("Open a question first.");
     let point = this.store.get().location.current;
     if (!point) point = await this.location.getCurrent();
     this.fillCoordinateFields(form, prefix, point);
@@ -1448,7 +1679,7 @@ class HideLineApp {
 
   async openCoordinatePicker(button) {
     const form = button.closest("form");
-    if (!form) throw new Error("Open the question form first.");
+    if (!form) throw new Error("Open the question first.");
     const prefix = String(button.dataset.prefix || "").trim();
     if (!prefix) throw new Error("This coordinate field could not be identified.");
     const initialPoint = this.coordinatePointFromForm(form, prefix)
@@ -1814,14 +2045,13 @@ class HideLineApp {
   }
 
   async handlePosition(position) {
-    this.store.patch("location.current", position);
+    this.store.patch("location.current", position, { source: "location", persist: false });
     if (this.store.get().location.sharing) await this.pushPosition(position, false);
-    if (this.store.get().ui.view === VIEWS.MAP && this.store.get().ui.mapMode === "zone") updateZoneMap({ station: this.stationMapObject(), positions: this.mapPositions(), radiusMetres: 500 });
     this.maybePromptEndgame(position);
   }
 
   handleLocationError(error) {
-    this.store.patch("location.error", error.message);
+    this.store.patch("location.error", error.message, { source: "location", persist: false });
     this.toast(error.message, "warning");
   }
 
@@ -1832,7 +2062,7 @@ class HideLineApp {
     const state = this.store.get();
     const ownId = state.connection.mode === "connected" ? this.sync.session?.user?.id : state.profile.id;
     const own = { gameId: state.game?.id, userId: ownId, team: state.profile.team, displayName: state.profile.name, ...position, sharingWith: state.location.shareWith };
-    this.store.set((draft) => { draft.positions = [...draft.positions.filter((item) => (item.userId || item.user_id) !== ownId), own]; return draft; });
+    this.store.set((draft) => { draft.positions = [...draft.positions.filter((item) => (item.userId || item.user_id) !== ownId), own]; return draft; }, { source: "location", persist: false });
     if (state.connection.mode === "connected") await this.sync.upsertPosition({ ...position, sharingWith: state.location.shareWith, displayName: state.profile.name, team: state.profile.team });
   }
 

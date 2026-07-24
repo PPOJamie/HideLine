@@ -1,5 +1,5 @@
-const CACHE_VERSION = "hideline-shell-v2.1.0";
-const RUNTIME_CACHE = "hideline-runtime-v2.1.0";
+const CACHE_VERSION = "hideline-shell-v2.1.2";
+const RUNTIME_CACHE = "hideline-runtime-v2.1.2";
 const APP_SHELL = [
   "./",
   "./index.html",

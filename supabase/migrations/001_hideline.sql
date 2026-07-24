@@ -238,12 +238,15 @@ begin
   if p_team not in ('alpha', 'bravo') then raise exception 'Invalid team'; end if;
   if char_length(trim(p_display_name)) < 1 then raise exception 'Display name is required'; end if;
 
-  select * into v_game from public.games where games.join_code = upper(trim(p_join_code));
+  select g.*
+    into v_game
+    from public.games as g
+   where g.join_code = upper(trim(p_join_code));
   if not found then raise exception 'No game found for that room code'; end if;
 
-  insert into public.game_members (game_id, user_id, display_name, team, is_host, last_seen)
+  insert into public.game_members as gm (game_id, user_id, display_name, team, is_host, last_seen)
   values (v_game.id, v_user, left(trim(p_display_name), 50), p_team, false, now())
-  on conflict (game_id, user_id) do update
+  on conflict on constraint game_members_pkey do update
     set display_name = excluded.display_name,
         team = excluded.team,
         last_seen = now();
