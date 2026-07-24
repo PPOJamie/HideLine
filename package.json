@@ -1,6 +1,6 @@
 {
   "name": "hideline-london-companion",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "An installable, multiplayer-ready companion PWA for a full-day London transit hide-and-seek game.",
   "type": "module",

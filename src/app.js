@@ -1,21 +1,39 @@
-import { DEFAULT_DURATIONS, PHASES, STORAGE_KEY, TEAM_LABELS, TEAMS, VIEWS } from "./core/constants.js";
+import { APP_VERSION, DEFAULT_DURATIONS, PHASES, STORAGE_KEY, TEAM_LABELS, TEAMS, VIEWS } from "./core/constants.js";
 import { Store, createGameState } from "./core/store.js";
 import { adjustmentTarget, calculateScore } from "./core/score.js";
 import { activeElapsedSeconds, formatDuration, parseDurationParts, questionSecondsRemaining, toIso } from "./core/time.js";
 import { downloadJson, escapeHtml, number, randomId, roomCode } from "./core/format.js";
 import { haversineMetres } from "./core/geo.js";
+import {
+  DEDUCTION_MOVEMENT,
+  DEDUCTION_TOOL_TYPES,
+  createDeductionRoundState,
+  normaliseDeductionRoundState
+} from "./core/deduction.js";
 import { QUESTION_BY_ID, repeatedReward } from "./data/questions.js";
-import { STATIONS, STATION_BY_ID } from "./data/stations.js";
+import { STATIONS, STATION_BY_ID, stationNameLength } from "./data/stations.js";
+import { STATION_GEO_BY_ID } from "./data/station-geo.js";
 import { SupabaseSync } from "./services/supabase.js";
 import { LocationService } from "./services/geolocation.js";
 import { compressImage } from "./services/media.js";
 import { clearEvidenceStore, getLocalEvidenceUrl, saveLocalEvidence } from "./services/evidence.js";
 import { fetchTflStatus } from "./services/tfl.js";
 import { cachedStationCoordinates, resolveStationCoordinates } from "./services/stations.js";
-import { destroyZoneMap, renderZoneMap, updateZoneMap } from "./services/map.js";
+import {
+  beginDeductionMapPick,
+  cancelDeductionMapPick,
+  destroyDeductionMap,
+  destroyZoneMap,
+  focusDeductionStation,
+  renderDeductionMap,
+  renderMapFallback,
+  renderZoneMap,
+  updateZoneMap
+} from "./services/map.js";
 import { renderShell } from "./ui/shell.js";
 import { renderPlay } from "./ui/play.js";
 import { renderMapView } from "./ui/map-view.js";
+import { buildDeductionViewModel } from "./ui/deduction-view.js";
 import { renderQuestionsView } from "./ui/questions-view.js";
 import { renderToolsView } from "./ui/tools-view.js";
 import { renderRulesView } from "./ui/rules-view.js";
@@ -100,12 +118,44 @@ class HideLineApp {
   afterRender() {
     const state = this.store.get();
     if (state.ui.view === VIEWS.MAP && state.ui.mapMode === "zone") {
+      destroyDeductionMap();
       const station = this.stationMapObject();
       const positions = this.mapPositions();
-      renderZoneMap({ station, positions, radiusMetres: DEFAULT_DURATIONS.hidingZoneRadiusMetres }).catch((error) => this.toast(error.message, "warning"));
-    } else {
-      destroyZoneMap();
+      renderZoneMap({ station, positions, radiusMetres: DEFAULT_DURATIONS.hidingZoneRadiusMetres }).catch((error) => {
+        renderMapFallback("zone-map", error.message);
+        this.toast(error.message, "warning");
+      });
+      return;
     }
+    if (state.ui.view === VIEWS.MAP && state.ui.mapMode === "deduction") {
+      destroyZoneMap();
+      const model = buildDeductionViewModel(state);
+      if (!model.canView) {
+        destroyDeductionMap();
+        return;
+      }
+      renderDeductionMap({
+        results: model.results,
+        constraints: model.constraints,
+        showEliminated: model.roundState.showEliminated,
+        showZones: model.roundState.showZones,
+        selectedStationId: state.ui.deductionSelectedStationId || null,
+        onStationAction: (action, id) => {
+          const promise = action === "deduction-toggle-priority"
+            ? this.toggleDeductionStationPriority(id)
+            : action === "deduction-toggle-eliminated"
+              ? this.toggleDeductionStationEliminated(id)
+              : null;
+          promise?.catch((error) => this.toast(error.message, "error"));
+        }
+      }).catch((error) => {
+        renderMapFallback("deduction-map", error.message);
+        this.toast(error.message, "warning");
+      });
+      return;
+    }
+    destroyZoneMap();
+    destroyDeductionMap();
   }
 
   captureFocus() {
@@ -210,7 +260,16 @@ class HideLineApp {
         case "close-modal": this.closeModal(); break;
         case "dismiss-toast": button.closest(".toast")?.remove(); break;
         case "install-app": await this.installApp(); break;
-        case "map-mode": this.store.patch("ui.mapMode", button.dataset.mode); break;
+        case "map-mode": cancelDeductionMapPick(); this.store.patch("ui.mapMode", button.dataset.mode); break;
+        case "deduction-fill-gps": await this.fillDeductionCoordinates(button.dataset.prefix, button); break;
+        case "deduction-pick-map": this.startDeductionMapPick(button.dataset.prefix, button); break;
+        case "deduction-focus-station": this.focusDeductionStation(button.dataset.id); break;
+        case "deduction-toggle-eliminated": await this.toggleDeductionStationEliminated(button.dataset.id); break;
+        case "deduction-toggle-priority": await this.toggleDeductionStationPriority(button.dataset.id); break;
+        case "deduction-toggle-auto": await this.toggleAutomaticDeduction(button.dataset.id); break;
+        case "deduction-remove-constraint": await this.removeDeductionConstraint(button.dataset.id); break;
+        case "deduction-undo": await this.undoDeduction(); break;
+        case "deduction-reset": await this.resetDeductionRound(); break;
         case "tool-tab": this.store.patch("ui.selectedTool", button.dataset.tool); break;
         case "question-category": this.store.patch("ui.questionCategory", button.dataset.category); break;
         case "open-ask-question": this.assertCanAskQuestion(); this.openModal("ask-question", { questionId: button.dataset.questionId }); break;
@@ -253,6 +312,7 @@ class HideLineApp {
     const action = event.target.dataset.action;
     if (action === "question-search") this.debouncedPatch("ui.questionSearch", event.target.value);
     if (action === "station-filter") this.debouncedPatch("ui.stationSearch", event.target.value);
+    if (action === "deduction-search") this.debouncedPatch("ui.deductionSearch", event.target.value);
   }
 
   async handleChange(event) {
@@ -263,6 +323,14 @@ class HideLineApp {
       if (this.store.get().location.sharing && this.store.get().location.current) await this.pushPosition(this.store.get().location.current, true);
     }
     if (action === "toggle-checklist") this.store.patch(["checklist", event.target.dataset.id], event.target.checked);
+    if (action === "deduction-tool") this.store.patch("ui.deductionTool", event.target.value);
+    if (action === "deduction-filter") await this.updateDeductionPreference("filter", event.target.value);
+    if (action === "deduction-show-eliminated") await this.updateDeductionPreference("showEliminated", event.target.checked);
+    if (action === "deduction-show-zones") await this.updateDeductionPreference("showZones", event.target.checked);
+    if (action === "deduction-enable-question") {
+      const details = event.target.closest(".deduction-question-fields");
+      details?.querySelectorAll(".deduction-auto-fields input, .deduction-auto-fields select, .deduction-auto-fields button").forEach((control) => { control.disabled = !event.target.checked; });
+    }
   }
 
   debouncedPatch(path, value) {
@@ -295,7 +363,8 @@ class HideLineApp {
         case "score-adjustment": await this.addScoreAdjustment(data); break;
         case "add-card": await this.addCard(data); break;
         case "add-trap": await this.addTrap(data); break;
-        case "ask-question": await this.askQuestion(form.dataset.questionId, data); break;
+        case "ask-question": await this.askQuestion(form.dataset.questionId, data, form); break;
+        case "deduction-constraint": await this.addDeductionConstraint(form, data); break;
         case "custom-answer": await this.answerQuestion(form.dataset.questionInstance, data.answer, data.note); break;
         case "photo-answer": await this.answerPhoto(form, data); break;
         case "mark-found": await this.markFound(data); break;
@@ -457,6 +526,7 @@ class HideLineApp {
         cards: [],
         handLimit: DEFAULT_DURATIONS.handLimit,
         privateNotes: "",
+        deductionByRound: {},
         ...teamState
       };
       draft.connection.mode = "connected";
@@ -726,7 +796,7 @@ class HideLineApp {
     this.toast("Safety check-in posted to the game timeline.", "success");
   }
 
-  async askQuestion(questionId, data) {
+  async askQuestion(questionId, data, form) {
     this.assertCanAskQuestion();
     const definition = QUESTION_BY_ID.get(questionId);
     if (!definition) throw new Error("Question definition not found.");
@@ -737,6 +807,7 @@ class HideLineApp {
     const reward = repeatedReward(definition, occurrence, state.settings.repeatRewardMode);
     const custom = String(data.customValue || "").trim();
     const prompt = custom ? `${definition.prompt} (${custom})` : definition.prompt;
+    const deductionInput = this.questionDeductionInput(definition, data, form, state);
     const record = {
       id: randomId("question"),
       questionId,
@@ -753,6 +824,8 @@ class HideLineApp {
       reward,
       occurrence,
       round,
+      phase: state.game?.phase || PHASES.SEEKING,
+      deductionInput,
       note: String(data.note || "").trim(),
       pinLabel: String(data.pinLabel || "").trim(),
       status: "pending",
@@ -778,6 +851,7 @@ class HideLineApp {
     record.answer = String(answer || "").trim();
     record.answerNote = String(note || "").trim();
     record.answeredAt = toIso();
+    record.answeredPhase = state.game?.phase || record.phase || PHASES.SEEKING;
     record.answeredBy = state.profile.id;
     record.answeredByName = state.profile.name;
     record.status = "answered";
@@ -954,6 +1028,277 @@ class HideLineApp {
     this.toast("Raw trap duration added to the score. Apply any card cap manually.", "success");
   }
 
+  deductionRoundKey() {
+    return String(this.store.get().game?.round || 1);
+  }
+
+  deductionRoundState() {
+    const state = this.store.get();
+    return normaliseDeductionRoundState(state.privateTeamState?.deductionByRound?.[this.deductionRoundKey()]);
+  }
+
+  deductionSnapshot(roundState) {
+    const { undoStack: _undoStack, ...snapshot } = normaliseDeductionRoundState(roundState);
+    return structuredClone(snapshot);
+  }
+
+  async mutateDeduction(mutator, { history = true } = {}) {
+    const roundKey = this.deductionRoundKey();
+    this.store.set((draft) => {
+      draft.privateTeamState.deductionByRound ||= {};
+      const current = normaliseDeductionRoundState(draft.privateTeamState.deductionByRound[roundKey]);
+      if (history) current.undoStack = [...(current.undoStack || []).slice(-11), this.deductionSnapshot(current)];
+      mutator(current, draft);
+      draft.privateTeamState.deductionByRound[roundKey] = current;
+      return draft;
+    });
+    await this.savePrivateTeamState();
+  }
+
+  async updateDeductionPreference(key, value) {
+    await this.mutateDeduction((roundState) => { roundState[key] = value; }, { history: false });
+  }
+
+  deductionPoint(data, prefix, label) {
+    const lat = Number(data[`${prefix}Lat`]);
+    const lng = Number(data[`${prefix}Lng`]);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      throw new Error(`Enter valid latitude and longitude for ${label}.`);
+    }
+    return { lat, lng };
+  }
+
+  async addDeductionConstraint(form, data) {
+    const type = form.dataset.constraintType;
+    const base = {
+      id: randomId("deduction"),
+      source: "manual",
+      type,
+      label: String(data.label || "").trim(),
+      createdAt: toIso(),
+      movementMode: data.movementMode === DEDUCTION_MOVEMENT.LOCKED ? DEDUCTION_MOVEMENT.LOCKED : DEDUCTION_MOVEMENT.MOBILE,
+      enabled: true
+    };
+    let constraint;
+    if (type === DEDUCTION_TOOL_TYPES.RADAR) {
+      const radiusMetres = Number(data.radiusKm) * 1000;
+      if (!Number.isFinite(radiusMetres) || radiusMetres <= 0) throw new Error("Enter a valid radar radius.");
+      constraint = { ...base, centre: this.deductionPoint(data, "centre", "the seeker pin"), radiusMetres, answer: data.answer === "no" ? "no" : "yes" };
+    } else if (type === DEDUCTION_TOOL_TYPES.THERMOMETER) {
+      constraint = {
+        ...base,
+        start: this.deductionPoint(data, "start", "the thermometer start"),
+        end: this.deductionPoint(data, "end", "the thermometer end"),
+        answer: data.answer === "colder" ? "colder" : "hotter"
+      };
+      if (haversineMetres(constraint.start, constraint.end) < 20) throw new Error("The thermometer endpoints are too close together to create a useful boundary.");
+    } else if (type === DEDUCTION_TOOL_TYPES.DISTANCE) {
+      constraint = {
+        ...base,
+        seeker: this.deductionPoint(data, "seeker", "the seeker pin"),
+        target: this.deductionPoint(data, "target", "the reference pin"),
+        answer: data.answer === "further" ? "further" : "closer"
+      };
+    } else if (type === DEDUCTION_TOOL_TYPES.STATION_NAME) {
+      const station = STATION_BY_ID.get(data.seekerStationId);
+      if (!station) throw new Error("Choose the seeker's station.");
+      constraint = {
+        ...base,
+        movementMode: DEDUCTION_MOVEMENT.MOBILE,
+        seekerStationId: station.id,
+        seekerLength: stationNameLength(station.name),
+        answer: ["same", "longer", "shorter"].includes(data.answer) ? data.answer : "same"
+      };
+    } else if (type === DEDUCTION_TOOL_TYPES.TRANSIT) {
+      const stationIds = new FormData(form).getAll("stationIds").map(String).filter((id) => STATION_BY_ID.has(id));
+      const lineId = String(data.lineId || "");
+      if (!lineId && !stationIds.length) throw new Error("Choose a line preset or select the train's exact stops.");
+      constraint = {
+        ...base,
+        movementMode: DEDUCTION_MOVEMENT.MOBILE,
+        lineId: lineId || null,
+        stationIds,
+        answer: data.answer === "no" ? "no" : "yes"
+      };
+    } else if (type === DEDUCTION_TOOL_TYPES.THAMES) {
+      constraint = {
+        ...base,
+        seekerSide: ["north", "south", "both"].includes(data.seekerSide) ? data.seekerSide : "north",
+        answer: data.answer === "no" ? "no" : "yes"
+      };
+    } else {
+      throw new Error("This deduction tool is not supported.");
+    }
+    await this.mutateDeduction((roundState) => { roundState.constraints.push(constraint); });
+    this.toast("Deduction applied to the private seeker map.", "success");
+  }
+
+  fillCoordinateFields(form, prefix, point) {
+    if (!form || !point) return;
+    const lat = form.querySelector(`[name="${CSS.escape(prefix)}Lat"]`);
+    const lng = form.querySelector(`[name="${CSS.escape(prefix)}Lng"]`);
+    if (!lat || !lng) throw new Error("The coordinate fields could not be found.");
+    lat.value = Number(point.lat).toFixed(6);
+    lng.value = Number(point.lng).toFixed(6);
+    lat.dispatchEvent(new Event("input", { bubbles: true }));
+    lng.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  async fillDeductionCoordinates(prefix, button) {
+    const form = button.closest("form");
+    if (!form) throw new Error("Open a deduction tool first.");
+    let point = this.store.get().location.current;
+    if (!point) point = await this.location.getCurrent();
+    this.fillCoordinateFields(form, prefix, point);
+    this.toast("GPS coordinates added.", "success");
+  }
+
+  startDeductionMapPick(prefix, button) {
+    const form = button.closest("form");
+    if (!form) throw new Error("Open a deduction tool first.");
+    beginDeductionMapPick(prefix, ({ lat, lng }) => {
+      if (!form.isConnected) return;
+      this.fillCoordinateFields(form, prefix, { lat, lng });
+      this.toast("Map coordinates added.", "success");
+    });
+    this.toast("Tap the required point on the map.", "warning");
+  }
+
+  focusDeductionStation(id) {
+    const geo = STATION_GEO_BY_ID.get(id);
+    if (!geo) return;
+    this.store.patch("ui.deductionSelectedStationId", id);
+    requestAnimationFrame(() => focusDeductionStation(geo));
+  }
+
+  async toggleDeductionStationEliminated(id) {
+    if (!STATION_BY_ID.has(id)) throw new Error("Station not found.");
+    await this.mutateDeduction((roundState) => {
+      const existing = roundState.stationOverrides[id] || {};
+      roundState.stationOverrides[id] = { ...existing, eliminated: !existing.eliminated, updatedAt: toIso() };
+      if (!roundState.stationOverrides[id].eliminated && !roundState.stationOverrides[id].priority && !roundState.stationOverrides[id].note) delete roundState.stationOverrides[id];
+    });
+  }
+
+  async toggleDeductionStationPriority(id) {
+    if (!STATION_BY_ID.has(id)) throw new Error("Station not found.");
+    await this.mutateDeduction((roundState) => {
+      const existing = roundState.stationOverrides[id] || {};
+      roundState.stationOverrides[id] = { ...existing, priority: !existing.priority, eliminated: existing.priority ? existing.eliminated : false, updatedAt: toIso() };
+      if (!roundState.stationOverrides[id].eliminated && !roundState.stationOverrides[id].priority && !roundState.stationOverrides[id].note) delete roundState.stationOverrides[id];
+    });
+  }
+
+  async toggleAutomaticDeduction(id) {
+    await this.mutateDeduction((roundState) => {
+      const ignored = new Set(roundState.ignoredAutoConstraintIds || []);
+      ignored.has(id) ? ignored.delete(id) : ignored.add(id);
+      roundState.ignoredAutoConstraintIds = [...ignored];
+    });
+  }
+
+  async removeDeductionConstraint(id) {
+    await this.mutateDeduction((roundState) => {
+      roundState.constraints = roundState.constraints.filter((constraint) => constraint.id !== id);
+    });
+  }
+
+  async undoDeduction() {
+    const roundKey = this.deductionRoundKey();
+    let restored = false;
+    this.store.set((draft) => {
+      draft.privateTeamState.deductionByRound ||= {};
+      const current = normaliseDeductionRoundState(draft.privateTeamState.deductionByRound[roundKey]);
+      const previous = current.undoStack?.at(-1);
+      if (!previous) return draft;
+      const remainingUndo = current.undoStack.slice(0, -1);
+      draft.privateTeamState.deductionByRound[roundKey] = { ...createDeductionRoundState(), ...structuredClone(previous), undoStack: remainingUndo };
+      restored = true;
+      return draft;
+    });
+    if (!restored) return this.toast("Nothing to undo.", "warning");
+    await this.savePrivateTeamState();
+    this.toast("Last deduction-map change undone.", "success");
+  }
+
+  async resetDeductionRound() {
+    if (!window.confirm("Reset every manual deduction, ignored answer and station mark for this round? Shared question history will not be deleted.")) return;
+    await this.mutateDeduction((roundState) => {
+      roundState.constraints = [];
+      roundState.stationOverrides = {};
+      roundState.ignoredAutoConstraintIds = [];
+    });
+    this.toast("Round deduction map reset. Answer records remain intact.", "success");
+  }
+
+  questionDeductionInput(question, data, form, state) {
+    if (!question || data.deductionEnabled !== "on") return null;
+    const movementMode = data.deductionMovementMode === DEDUCTION_MOVEMENT.LOCKED || state.game?.phase === PHASES.ENDGAME
+      ? DEDUCTION_MOVEMENT.LOCKED
+      : DEDUCTION_MOVEMENT.MOBILE;
+    if (question.category === "radar") {
+      const fixedRadius = {
+        "radar-0-5": 500,
+        "radar-1": 1000,
+        "radar-2": 2000,
+        "radar-5": 5000,
+        "radar-10": 10000
+      }[question.id];
+      const customRadius = Number.parseFloat(String(data.customValue || "").replace(",", ".")) * 1000;
+      const radiusMetres = fixedRadius || customRadius;
+      if (!Number.isFinite(radiusMetres) || radiusMetres <= 0) throw new Error("Enter a valid custom radar radius before adding it to the deduction map.");
+      return {
+        enabled: true,
+        type: DEDUCTION_TOOL_TYPES.RADAR,
+        movementMode,
+        centre: this.deductionPoint(data, "deductionCentre", "the radar pin"),
+        radiusMetres
+      };
+    }
+    if (question.category === "thermometer") {
+      return {
+        enabled: true,
+        type: DEDUCTION_TOOL_TYPES.THERMOMETER,
+        movementMode,
+        start: this.deductionPoint(data, "deductionStart", "the thermometer start"),
+        end: this.deductionPoint(data, "deductionEnd", "the thermometer end")
+      };
+    }
+    if (question.id === "matching-station-name") {
+      const station = STATION_BY_ID.get(data.deductionSeekerStationId);
+      if (!station) throw new Error("Choose the seeker's station for automatic name-length filtering.");
+      return {
+        enabled: true,
+        type: DEDUCTION_TOOL_TYPES.STATION_NAME,
+        movementMode: DEDUCTION_MOVEMENT.MOBILE,
+        seekerStationId: station.id,
+        seekerLength: stationNameLength(station.name)
+      };
+    }
+    if (question.id === "matching-rail-line") {
+      const stationIds = new FormData(form).getAll("deductionStationIds").map(String).filter((id) => STATION_BY_ID.has(id));
+      const lineId = String(data.deductionLineId || "");
+      if (!lineId && !stationIds.length) throw new Error("Choose a transit-line preset or the exact stops for automatic filtering.");
+      return {
+        enabled: true,
+        type: DEDUCTION_TOOL_TYPES.TRANSIT,
+        movementMode: DEDUCTION_MOVEMENT.MOBILE,
+        lineId: lineId || null,
+        stationIds
+      };
+    }
+    if (question.id === "matching-landmass") {
+      if (!["north", "south", "both"].includes(data.deductionSeekerSide)) throw new Error("Choose the seeker's side of the Thames.");
+      return {
+        enabled: true,
+        type: DEDUCTION_TOOL_TYPES.THAMES,
+        movementMode,
+        seekerSide: data.deductionSeekerSide
+      };
+    }
+    return null;
+  }
+
   randomStation() {
     const state = this.store.get();
     const used = new Set(state.game?.usedStations || []);
@@ -1109,7 +1454,7 @@ class HideLineApp {
     const state = this.store.get();
     downloadJson(`hideline-${state.game?.code || "export"}-${new Date().toISOString().slice(0, 10)}.json`, {
       exportedAt: toIso(),
-      appVersion: "1.0.0",
+      appVersion: APP_VERSION,
       game: state.game,
       questions: state.questions,
       events: state.events,
@@ -1129,7 +1474,7 @@ class HideLineApp {
       draft.questions = [];
       draft.events = [];
       draft.positions = [];
-      draft.privateTeamState = { stationId: null, stationName: null, stationCoords: null, hidingSpotNote: "", cards: [], handLimit: 6, privateNotes: "" };
+      draft.privateTeamState = { stationId: null, stationName: null, stationCoords: null, hidingSpotNote: "", cards: [], handLimit: 6, privateNotes: "", deductionByRound: {} };
       draft.connection.mode = "local";
       draft.connection.status = "offline";
       draft.connection.gameId = null;

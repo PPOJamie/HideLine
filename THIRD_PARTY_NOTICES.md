@@ -12,14 +12,14 @@ The configured map ID points to a user-provided Google My Maps layer. The map, b
 
 ## Transport and map data
 
-- Transport for London names, status data and station search responses are provided by TfL and remain subject to TfL terms.
+- Transport for London names, status data and station information are provided by TfL and remain subject to TfL terms. Embedded station centres are planning coordinates and do not supersede the supplied authoritative map.
 - OpenStreetMap map data and tiles are credited in the map interface and remain subject to OpenStreetMap/OpenStreetMap Foundation terms and the Open Database Licence where applicable.
 - Nominatim is used only as a fallback station geocoder and is subject to its usage policy.
 - National Rail and linked service-status pages are external services with their own terms.
 
 ## Runtime libraries and CDNs
 
-- Leaflet 1.9.4 is loaded from unpkg and is distributed under the BSD 2-Clause licence.
+- Leaflet 1.9.4 is loaded from unpkg, runtime-cached after first use, and distributed under the BSD 2-Clause licence.
 - Supabase JavaScript 2.x is loaded as an ES module bundle from esm.sh and is distributed under the MIT licence.
 
 Review and pin/CDN-host these dependencies according to your deployment's supply-chain requirements.

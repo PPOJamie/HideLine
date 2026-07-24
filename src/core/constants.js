@@ -1,11 +1,12 @@
 export const APP_NAME = "HideLine";
-export const APP_VERSION = "1.0.0";
+export const APP_VERSION = "1.1.0";
 export const STORAGE_KEY = "hideline:v1:state";
 export const SETTINGS_KEY = "hideline:v1:settings";
 export const SUPABASE_MODULE_URL = "https://esm.sh/@supabase/supabase-js@2?bundle";
 export const LEAFLET_JS_URL = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
 export const LEAFLET_CSS_URL = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-export const GAME_MAP_ID = window.HIDELINE_CONFIG?.googleMapId || "1lDtKjR7rN1zelD3FjepU1XNvHmnb774";
+const RUNTIME_CONFIG = typeof window !== "undefined" ? window.HIDELINE_CONFIG || {} : {};
+export const GAME_MAP_ID = RUNTIME_CONFIG.googleMapId || "1lDtKjR7rN1zelD3FjepU1XNvHmnb774";
 export const GAME_MAP_URL = `https://www.google.com/maps/d/viewer?mid=${GAME_MAP_ID}`;
 export const GAME_MAP_EMBED_URL = `https://www.google.com/maps/d/embed?mid=${GAME_MAP_ID}`;
 export const HANDBOOK_FILE = "Hide and Seek_London_SG2Rs45_Handbook9.pdf";
@@ -49,7 +50,7 @@ export const VIEWS = Object.freeze({
 
 export const VIEW_META = Object.freeze({
   play: { title: "Game board", subtitle: "Round control, teams and live timeline" },
-  map: { title: "Map & movement", subtitle: "Authoritative boundary, hiding zone and transit intent" },
+  map: { title: "Map & movement", subtitle: "Authoritative boundary, live deduction, hiding zone and transit intent" },
   questions: { title: "Investigation", subtitle: "Ask, time and answer handbook questions" },
   tools: { title: "Toolkit", subtitle: "Scores, cards, traps, stations and service status" },
   rules: { title: "Rules", subtitle: "Fast, role-aware reference from the London handbook" }

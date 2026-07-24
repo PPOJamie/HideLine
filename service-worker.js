@@ -1,4 +1,5 @@
-const CACHE_VERSION = "hideline-shell-v1.1.0";
+const CACHE_VERSION = "hideline-shell-v1.2.0";
+const RUNTIME_CACHE = "hideline-runtime-v1.1.0";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -18,10 +19,12 @@ const APP_SHELL = [
   "./src/core/geo.js",
   "./src/core/score.js",
   "./src/core/store.js",
+  "./src/core/deduction.js",
   "./src/data/stations.js",
   "./src/data/questions.js",
   "./src/data/rules.js",
   "./src/data/boundary.js",
+  "./src/data/station-geo.js",
   "./src/services/geolocation.js",
   "./src/services/tfl.js",
   "./src/services/media.js",
@@ -33,6 +36,7 @@ const APP_SHELL = [
   "./src/ui/shell.js",
   "./src/ui/play.js",
   "./src/ui/map-view.js",
+  "./src/ui/deduction-view.js",
   "./src/ui/questions-view.js",
   "./src/ui/tools-view.js",
   "./src/ui/rules-view.js",
@@ -46,7 +50,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_VERSION).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => ![CACHE_VERSION, RUNTIME_CACHE].includes(key)).map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
@@ -55,7 +59,21 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin) {
+    const cacheableLeaflet = url.hostname === "unpkg.com" && url.pathname.includes("/leaflet@1.9.4/dist/");
+    if (cacheableLeaflet) {
+      event.respondWith(
+        caches.open(RUNTIME_CACHE).then(async (cache) => {
+          const cached = await cache.match(request);
+          if (cached) return cached;
+          const response = await fetch(request);
+          if (response.ok || response.type === "opaque") await cache.put(request, response.clone());
+          return response;
+        })
+      );
+    }
+    return;
+  }
 
   if (request.mode === "navigate") {
     event.respondWith(

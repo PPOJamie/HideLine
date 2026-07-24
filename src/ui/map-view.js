@@ -3,6 +3,7 @@ import { escapeHtml, formatDateTime } from "../core/format.js";
 import { formatDistance, haversineMetres, isWithinRadius } from "../core/geo.js";
 import { STATIONS, STATION_BY_ID, stationNameLength } from "../data/stations.js";
 import { icon } from "./icons.js";
+import { renderDeductionView } from "./deduction-view.js";
 
 function stationOptions(selectedId) {
   return STATIONS.map((station) => `<option value="${station.id}" ${station.id === selectedId ? "selected" : ""}>${escapeHtml(station.name)}${station.note ? ` - ${escapeHtml(station.note)}` : ""}</option>`).join("");
@@ -99,11 +100,12 @@ export function renderMapView(state) {
       <div class="row-between wrap">
         <div class="segmented" role="tablist" aria-label="Map mode">
           <button type="button" class="${mode === "authoritative" ? "active" : ""}" data-action="map-mode" data-mode="authoritative">Game map</button>
+          <button type="button" class="${mode === "deduction" ? "active" : ""}" data-action="map-mode" data-mode="deduction">Deduction map</button>
           <button type="button" class="${mode === "zone" ? "active" : ""}" data-action="map-mode" data-mode="zone">Zone check</button>
         </div>
         <a class="button button-soft button-small" href="https://www.google.com/maps" target="_blank" rel="noopener">${icon("external")} Google Maps</a>
       </div>
-      ${mode === "authoritative" ? renderAuthoritativeMap() : renderZoneCheck(state)}
+      ${mode === "authoritative" ? renderAuthoritativeMap() : mode === "deduction" ? renderDeductionView(state) : renderZoneCheck(state)}
       ${renderTransit(state)}
       <section class="callout warning">${icon("alert")}<p><strong>Do not navigate while walking.</strong>Stop in a safe place before using the app, especially near roads, platforms and stairs.</p></section>
     </div>

@@ -2,26 +2,87 @@
   "id": "./",
   "name": "HideLine - London Hide + Seek Companion",
   "short_name": "HideLine",
-  "description": "Timers, questions, maps, scoring, live team sync and safety tools for a London transit hide-and-seek day.",
+  "description": "Timers, live deduction maps, questions, scoring, team sync and safety tools for a London transit hide-and-seek day.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#edf3f7",
   "theme_color": "#0b1f33",
-  "categories": ["games", "navigation", "utilities"],
+  "categories": [
+    "games",
+    "navigation",
+    "utilities"
+  ],
   "icons": [
-    {"src": "./assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-    {"src": "./assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
-    {"src": "./assets/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+    {
+      "src": "./assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ],
   "screenshots": [
-    {"src": "./assets/screenshot-mobile.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "Game dashboard"},
-    {"src": "./assets/screenshot-desktop.png", "sizes": "1440x1000", "type": "image/png", "form_factor": "wide", "label": "HideLine desktop dashboard"}
+    {
+      "src": "./assets/screenshot-mobile.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Game dashboard"
+    },
+    {
+      "src": "./assets/screenshot-desktop.png",
+      "sizes": "1440x1000",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "HideLine desktop dashboard"
+    }
   ],
   "shortcuts": [
-    {"name": "Game board", "short_name": "Play", "url": "./?view=play", "icons": [{"src": "./assets/icon-192.png", "sizes": "192x192"}]},
-    {"name": "Ask a question", "short_name": "Ask", "url": "./?view=questions", "icons": [{"src": "./assets/icon-192.png", "sizes": "192x192"}]},
-    {"name": "Score tools", "short_name": "Score", "url": "./?view=tools", "icons": [{"src": "./assets/icon-192.png", "sizes": "192x192"}]}
+    {
+      "name": "Game board",
+      "short_name": "Play",
+      "url": "./?view=play",
+      "icons": [
+        {
+          "src": "./assets/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Ask a question",
+      "short_name": "Ask",
+      "url": "./?view=questions",
+      "icons": [
+        {
+          "src": "./assets/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Score tools",
+      "short_name": "Score",
+      "url": "./?view=tools",
+      "icons": [
+        {
+          "src": "./assets/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
   ]
 }

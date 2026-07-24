@@ -4,7 +4,7 @@ import { randomId, roomCode } from "./format.js";
 
 export function createDefaultState() {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     profile: {
       id: localStorage.getItem("hideline:device-id") || randomId("device"),
       name: "Player",
@@ -15,6 +15,9 @@ export function createDefaultState() {
       questionCategory: "all",
       questionSearch: "",
       mapMode: "authoritative",
+      deductionTool: "radar",
+      deductionSearch: "",
+      deductionSelectedStationId: null,
       selectedTool: "score",
       installPromptAvailable: false
     },
@@ -36,7 +39,8 @@ export function createDefaultState() {
       hidingSpotNote: "",
       cards: [],
       handLimit: DEFAULT_DURATIONS.handLimit,
-      privateNotes: ""
+      privateNotes: "",
+      deductionByRound: {}
     },
     questions: [],
     events: [],

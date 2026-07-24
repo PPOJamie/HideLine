@@ -3,6 +3,7 @@ import { escapeHtml, formatDateTime } from "../core/format.js";
 import { QUESTION_BY_ID, repeatedReward } from "../data/questions.js";
 import { CARD_TYPES } from "../data/rules.js";
 import { STATIONS, STATION_BY_ID } from "../data/stations.js";
+import { RAIL_LINES } from "../data/station-geo.js";
 import { icon } from "./icons.js";
 
 function frame(title, subtitle, body, actions = "") {
@@ -181,6 +182,56 @@ function addTrapModal() {
   `);
 }
 
+function deductionCoordinateFields(prefix, label, current = null) {
+  const lat = current?.lat != null ? Number(current.lat).toFixed(6) : "";
+  const lng = current?.lng != null ? Number(current.lng).toFixed(6) : "";
+  return `
+    <fieldset class="coordinate-pair compact-coordinate-pair">
+      <legend>${escapeHtml(label)}</legend>
+      <div class="field-row"><div class="field"><label for="${prefix}-lat">Latitude</label><input id="${prefix}-lat" name="${prefix}Lat" type="number" inputmode="decimal" step="any" min="-90" max="90" value="${lat}" /></div><div class="field"><label for="${prefix}-lng">Longitude</label><input id="${prefix}-lng" name="${prefix}Lng" type="number" inputmode="decimal" step="any" min="-180" max="180" value="${lng}" /></div></div>
+      <button class="button button-soft button-small" type="button" data-action="deduction-fill-gps" data-prefix="${prefix}">${icon("location")} Use current GPS</button>
+    </fieldset>`;
+}
+
+function deductionMovementSelect(state) {
+  const locked = state.game?.phase === PHASES.ENDGAME;
+  return `<div class="field"><label for="deduction-movement">Movement rule for this answer</label><select id="deduction-movement" name="deductionMovementMode"><option value="mobile" ${locked ? "" : "selected"}>Before endgame — hider may move within the zone</option><option value="locked" ${locked ? "selected" : ""}>Endgame — fixed hiding spot</option></select></div>`;
+}
+
+function deductionLineOptions() {
+  const groups = new Map();
+  for (const line of RAIL_LINES) {
+    if (!groups.has(line.group)) groups.set(line.group, []);
+    groups.get(line.group).push(line);
+  }
+  return `<option value="">Choose a line or operator…</option>${[...groups.entries()].map(([group, lines]) => `<optgroup label="${escapeHtml(group)}">${lines.map((line) => `<option value="${line.id}">${escapeHtml(line.name)}</option>`).join("")}</optgroup>`).join("")}`;
+}
+
+function questionDeductionFields(state, question) {
+  const current = state.location?.current || null;
+  let fields = "";
+  if (question.category === "radar") {
+    fields = `${deductionCoordinateFields("deductionCentre", "Seeker radar pin", current)}${deductionMovementSelect(state)}`;
+  } else if (question.category === "thermometer") {
+    fields = `${deductionCoordinateFields("deductionStart", "Position before travelling")}${deductionCoordinateFields("deductionEnd", "Position after travelling", current)}${deductionMovementSelect(state)}`;
+  } else if (question.id === "matching-station-name") {
+    fields = `<div class="field"><label for="deduction-seeker-station">Seeker station</label><select id="deduction-seeker-station" name="deductionSeekerStationId"><option value="">Choose the definitive handbook name…</option>${STATIONS.map((station) => `<option value="${station.id}">${escapeHtml(station.name)}${station.note ? ` — ${escapeHtml(station.note)}` : ""}</option>`).join("")}</select></div>`;
+  } else if (question.id === "matching-rail-line") {
+    fields = `<div class="field"><label for="deduction-line">Line / operator preset</label><select id="deduction-line" name="deductionLineId">${deductionLineOptions()}</select></div><div class="field"><label for="deduction-stops">Exact stops in the game area (recommended when branches differ)</label><select id="deduction-stops" name="deductionStationIds" multiple size="7">${STATIONS.map((station) => `<option value="${station.id}">${escapeHtml(station.name)}${station.note ? ` — ${escapeHtml(station.note)}` : ""}</option>`).join("")}</select><span class="field-hint">Exact stops override the preset and make the filter match the particular train you are riding.</span></div>`;
+  } else if (question.id === "matching-landmass") {
+    fields = `<div class="field"><label for="deduction-thames-side">Seeker position</label><select id="deduction-thames-side" name="deductionSeekerSide"><option value="north">North of the Thames</option><option value="south">South of the Thames</option><option value="both">On a bridge / in a tunnel</option></select></div>${deductionMovementSelect(state)}`;
+  }
+  if (!fields) return "";
+  return `
+    <details class="deduction-question-fields" open>
+      <summary><span>${icon("filter")} Add this answer to the Deduction Map</span><span class="badge badge-mint">Map-ready</span></summary>
+      <div class="stack deduction-question-body">
+        <label class="checkbox-row"><input type="checkbox" name="deductionEnabled" data-action="deduction-enable-question" checked /><span><strong>Automatically apply the answer after it is submitted</strong><br><span class="field-hint">The answer stays shared; the resulting eliminated-station map remains private to the seeker team.</span></span></label>
+        <div class="deduction-auto-fields stack">${fields}</div>
+      </div>
+    </details>`;
+}
+
 function askQuestionModal(state, questionId) {
   const question = QUESTION_BY_ID.get(questionId);
   if (!question) return frame("Question not found", "", `<p>The selected question is no longer available.</p>`);
@@ -193,6 +244,7 @@ function askQuestionModal(state, questionId) {
       <div class="grid grid-3"><div class="metric-card card"><span class="metric-label">Draw</span><strong class="metric-value">${reward.draw}</strong></div><div class="metric-card card"><span class="metric-label">Keep</span><strong class="metric-value">${reward.keep}</strong></div><div class="metric-card card"><span class="metric-label">Deadline</span><strong class="metric-value" style="font-size:1.6rem">${question.responseSeconds / 60} min</strong></div></div>
       ${question.requiresPin ? `<div class="field"><label for="question-pin">Shared pin / location label</label><input id="question-pin" name="pinLabel" maxlength="120" placeholder="Paste a Google Maps pin or describe the pinned location" /><span class="field-hint">Share the actual pin with the hiders before submitting.</span></div>` : ""}
       ${question.customInput ? `<div class="field"><label for="custom-value">Custom radius / parameter</label><input id="custom-value" name="customValue" maxlength="80" required placeholder="e.g. 7.4 km" /></div>` : ""}
+      ${questionDeductionFields(state, question)}
       <div class="field"><label for="question-note">Optional clarification</label><textarea id="question-note" name="note" maxlength="400" placeholder="Line branch, endpoints, altitude, floor, POI interpretation..."></textarea></div>
       <label class="checkbox-row"><input type="checkbox" name="confirmed" required /><span>I confirm no other question is currently awaiting an answer, and any required pin/transit intent has been shared.</span></label>
       <button class="button button-primary" type="submit">${icon("clock")} Ask and start timer</button>

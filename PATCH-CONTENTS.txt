@@ -1,0 +1,41 @@
+HideLine 1.1.0 Live Deduction Map update
+=========================================
+
+Upload the contents of this folder over the existing repository.
+config.js is intentionally omitted so hosted Supabase and map settings are not overwritten.
+Detailed instructions: UPDATE-DEDUCTION-MAP.md
+
+Project files in this patch: 32
+
+.github/ISSUE_TEMPLATE/bug_report.yml
+CHANGELOG.md
+PRIVACY.md
+README.md
+THIRD_PARTY_NOTICES.md
+UPDATE-DEDUCTION-MAP.md
+assets/screenshot-deduction-desktop.png
+assets/screenshot-deduction-mobile.png
+docs/ARCHITECTURE.md
+index.html
+manifest.webmanifest
+package.json
+scripts/validate-data.mjs
+service-worker.js
+src/app.js
+src/core/constants.js
+src/core/deduction.js
+src/core/store.js
+src/data/station-geo.js
+src/services/map.js
+src/services/stations.js
+src/services/supabase.js
+src/styles.css
+src/ui/deduction-view.js
+src/ui/icons.js
+src/ui/map-view.js
+src/ui/modals.js
+src/ui/questions-view.js
+supabase/README.md
+supabase/migrations/001_hideline.sql
+supabase/migrations/002_deduction_map.sql
+tests/deduction.test.mjs

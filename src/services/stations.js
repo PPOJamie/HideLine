@@ -1,3 +1,5 @@
+import { STATION_GEO_BY_ID } from "../data/station-geo.js";
+
 const CACHE_KEY = "hideline:station-coordinates:v1";
 
 function readCache() {
@@ -8,7 +10,10 @@ function writeCache(cache) {
 }
 
 export function cachedStationCoordinates(stationId) {
-  return readCache()[stationId] || null;
+  const cached = readCache()[stationId];
+  if (cached) return cached;
+  const embedded = STATION_GEO_BY_ID.get(stationId);
+  return embedded ? { lat: embedded.lat, lng: embedded.lng, source: "embedded station data", label: stationId } : null;
 }
 
 export async function resolveStationCoordinates(station, { signal } = {}) {

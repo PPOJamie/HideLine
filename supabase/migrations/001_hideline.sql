@@ -172,7 +172,8 @@ as $$
     'hidingSpotNote', '',
     'cards', '[]'::jsonb,
     'handLimit', 6,
-    'privateNotes', ''
+    'privateNotes', '',
+    'deductionByRound', '{}'::jsonb
   );
 $$;
 
