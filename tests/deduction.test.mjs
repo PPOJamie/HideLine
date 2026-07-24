@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEDUCTION_AREA_SELECTION_ALL,
   DEDUCTION_MOVEMENT,
   DEDUCTION_STATUS,
   DEDUCTION_TOOL_TYPES,
   deriveAutomaticConstraints,
   evaluateStationPossibilities,
   evaluateZoneAreaMask,
+  normaliseDeductionRoundState,
   sampleZoneCells,
   sampleZonePoints,
   thamesSide
@@ -48,6 +50,44 @@ test("mobile snapshots can both fit one station even when no single fixed point 
   })[0];
   assert.notEqual(mobile.baseStatus, DEDUCTION_STATUS.ELIMINATED);
   assert.equal(locked.baseStatus, DEDUCTION_STATUS.ELIMINATED);
+});
+
+test("the combined answer overlay shows exclusions from every supplied answer at once", () => {
+  const station = { id: "combined-overlay", name: "Combined overlay", lat: 51.5, lng: -0.1 };
+  const constraints = [
+    {
+      id: "overlay-east",
+      type: DEDUCTION_TOOL_TYPES.RADAR,
+      movementMode: DEDUCTION_MOVEMENT.MOBILE,
+      centre: { lat: 51.5, lng: -0.098 },
+      radiusMetres: 430,
+      answer: "yes"
+    },
+    {
+      id: "overlay-west",
+      type: DEDUCTION_TOOL_TYPES.RADAR,
+      movementMode: DEDUCTION_MOVEMENT.MOBILE,
+      centre: { lat: 51.5, lng: -0.102 },
+      radiusMetres: 430,
+      answer: "yes"
+    }
+  ];
+  const mask = evaluateZoneAreaMask({
+    station,
+    constraints,
+    mode: "overlay",
+    cellSizeMetres: 35
+  });
+  assert.equal(mask.constraintCount, 2);
+  assert.ok(mask.allowed > 0);
+  assert.ok(mask.excluded > 0);
+  assert.equal(mask.unknown, 0);
+  assert.ok(mask.cells.some((cell) => cell.state === "excluded" && cell.excludedByCount >= 2));
+});
+
+test("older latest-answer preferences migrate to the all-answer overlay", () => {
+  const roundState = normaliseDeductionRoundState({ areaConstraintId: "latest" });
+  assert.equal(roundState.areaConstraintId, DEDUCTION_AREA_SELECTION_ALL);
 });
 
 test("station-name length is a station-level filter", () => {

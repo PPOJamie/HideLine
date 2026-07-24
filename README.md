@@ -12,7 +12,7 @@ HideLine is an installable, mobile-first progressive web app for the full-day, t
 
 - **Guided two-round game control** with the standard 45-minute hiding period, seeker release, pause accounting, endgame, found confirmation and 4 h 45 min cutoff.
 - **A complete investigation workflow** for Matching, Measuring, Thermometer, Radar, Tentacles and Photo questions, including repeat multipliers, answer deadlines, evidence and an auditable history.
-- **A private Live Deduction Map** with cell-by-cell allowed/excluded masks inside every 500 m station circle, all 55 handbook questions linked to the audit trail, automatic POI/region/Tentacle geometry after map-data import, and a dedicated fixed-spot Endgame circle.
+- **A private Live Deduction Map** with a combined all-answer exclusion overlay inside every 500 m station circle, optional single-answer inspection, all 55 handbook questions linked to the audit trail, automatic POI/region/Tentacle geometry after map-data import, and a dedicated fixed-spot Endgame circle.
 - **The authoritative Google My Maps game layer** embedded in the app, plus separate deduction and zone-check maps with optional team positions and an explicitly labelled approximate boundary.
 - **All 100 handbook hiding stations**, searchable and randomisable, with station-name length support and a used-station tracker.
 - **Hider tools** for a private station, hiding notes, six-card hand management, power-ups/curses and timestamped time traps.
@@ -27,7 +27,7 @@ HideLine is an installable, mobile-first progressive web app for the full-day, t
 Open **Map → Deduction map** while your team is seeking. All deductions use one private audit trail, but the map has three deliberately different views:
 
 1. **Overview** shows the viability of all 100 station-centred hiding zones.
-2. **Answer areas** shows one question at a time and clips a detailed cell mask to each 500 m circle. Grey cells could not have produced that answer; green cells could; amber cells are unresolved because a required map layer or human review is still missing.
+2. **Answer areas** defaults to **All linked answers — combined overlay** and clips a detailed cell mask to every visible 500 m circle. Grey means one or more ready answers excludes that cell, with darker grey indicating more exclusions. Green survives every displayed ready answer at that coordinate; amber still needs a required map layer or human review. The selector can still isolate any one answer for a clean single-question mask.
 3. **Endgame circle** hides the rest of London, shows only the chosen station's 500 m circle, and intersects every answer marked **Endgame — fixed hiding spot** at one common location.
 
 The station overview uses these statuses:
@@ -50,7 +50,9 @@ For a Tentacle answer, HideLine first selects only the imported POIs of that cat
 
 ### Movement-aware area logic
 
-Before endgame, each answer is a separate location snapshot because the hider can move within the same 500 m station zone between questions. The app therefore does **not** intersect unrelated pre-endgame answer cells into a false fixed location. Use **Answer areas** to inspect the exact possible part for a chosen question.
+Before endgame, each answer is a separate location snapshot because the hider can move within the same 500 m station zone between questions. The combined Answer Areas view is therefore presented as an **evidence overlay**, not as proof that the hider remained at one fixed point. It shows every exclusion together for planning, while the station viability engine continues to assess each mobile answer separately. A station is not eliminated merely because the combined overlay has no single common green cell when different answers could have been given from different points in its zone.
+
+Use **Show all areas** above the linked-answer list to return to the combined overlay after inspecting one question. Use **Show all circles** in the Endgame view, or select **Overview**, to clear the Endgame focus and fit the complete station map again without deleting any deductions.
 
 Once endgame has genuinely begun, new answers are marked **Endgame — fixed hiding spot** automatically. The **Endgame circle** intersects those locked answers because they must all be true at the same physical point. All 100 stations remain selectable in that view so an earlier mistaken deduction cannot prevent the team from opening the correct circle.
 
@@ -87,7 +89,7 @@ Local Mode works immediately. Connected Mode needs a Supabase project:
 
 1. Create a Supabase project.
 2. Enable **Authentication → Providers → Anonymous Sign-Ins**.
-3. For a new project, run [`supabase/migrations/001_hideline.sql`](supabase/migrations/001_hideline.sql) once in the Supabase SQL editor. If the project was originally created with HideLine 1.0, also run [`supabase/migrations/002_deduction_map.sql`](supabase/migrations/002_deduction_map.sql). HideLine 1.2 needs no additional database migration.
+3. For a new project, run [`supabase/migrations/001_hideline.sql`](supabase/migrations/001_hideline.sql) once in the Supabase SQL editor. If the project was originally created with HideLine 1.0, also run [`supabase/migrations/002_deduction_map.sql`](supabase/migrations/002_deduction_map.sql). HideLine 1.3 needs no additional database migration.
 4. Copy the project URL and anon key from the project API settings.
 5. Either place them in `config.js` or enter them in HideLine's Settings screen.
 

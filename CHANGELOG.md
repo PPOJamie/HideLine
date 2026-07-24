@@ -2,6 +2,19 @@
 
 All notable changes to HideLine are documented here.
 
+## 1.3.0 — Combined exclusion overlay and Endgame reset
+
+- Added an **All linked answers — combined overlay** option that shows exclusions from every ready linked answer across all visible 500 m station circles at the same time.
+- Made the combined overlay the default Answer Areas view, including automatic migration from the former `latest` selection.
+- Added darker grey shading when multiple answers independently exclude the same map cell.
+- Kept pre-Endgame station viability movement-aware: the combined mask is a planning overlay and does not falsely eliminate a station when the hider could have moved between answer snapshots.
+- Added **Show all areas** above the linked-answer audit trail to return from a single-answer inspection to the complete overlay in one tap.
+- Added **Show all circles** inside the Endgame controls to clear the single-circle focus and return to the full Overview without deleting deductions.
+- Fixed stale Endgame station focus continuing to zoom or highlight one station after switching back to Overview or Answer Areas.
+- Made station-level answers such as station-name length and transit-line matching viewable as whole-circle masks alongside area-producing questions.
+- Added deterministic mask, migration and rendered-UI tests. The suite now contains 25 tests.
+- Updated the PWA cache and documentation. No Supabase migration is required.
+
 ## 1.2.0 — Detailed area masks and Endgame circle
 
 - Added cell-by-cell allowed, excluded and unresolved shading clipped to each station's exact 500 m circle.

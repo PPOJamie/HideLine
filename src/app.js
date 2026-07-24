@@ -5,6 +5,7 @@ import { activeElapsedSeconds, formatDuration, parseDurationParts, questionSecon
 import { downloadJson, escapeHtml, number, randomId, roomCode } from "./core/format.js";
 import { haversineMetres } from "./core/geo.js";
 import {
+  DEDUCTION_AREA_SELECTION_ALL,
   DEDUCTION_MAP_MODES,
   DEDUCTION_MOVEMENT,
   DEDUCTION_TOOL_TYPES,
@@ -147,6 +148,8 @@ class HideLineApp {
         displayMode: model.roundState.mapDisplayMode,
         maskScope: model.roundState.maskScope,
         activeConstraint: model.activeAreaConstraint,
+        answerConstraints: model.answerConstraints,
+        answerSelectionAll: model.areaSelectionAll,
         endgameStation: model.endgameStation,
         spatialFeatures: model.spatialData.features,
         selectedStationId: state.ui.deductionSelectedStationId || null,
@@ -271,8 +274,10 @@ class HideLineApp {
         case "dismiss-toast": button.closest(".toast")?.remove(); break;
         case "install-app": await this.installApp(); break;
         case "map-mode": cancelDeductionMapPick(); this.store.patch("ui.mapMode", button.dataset.mode); break;
-        case "deduction-map-display": await this.updateDeductionPreference("mapDisplayMode", button.dataset.mode); break;
+        case "deduction-map-display": await this.setDeductionMapDisplay(button.dataset.mode); break;
+        case "deduction-show-all-constraints": await this.showAllDeductionConstraints(); break;
         case "deduction-show-constraint": await this.showDeductionConstraint(button.dataset.id); break;
+        case "deduction-exit-endgame": await this.exitDeductionEndgameView(); break;
         case "deduction-fill-gps": await this.fillDeductionCoordinates(button.dataset.prefix, button); break;
         case "deduction-pick-map": this.startDeductionMapPick(button.dataset.prefix, button); break;
         case "deduction-pick-vertex": this.startDeductionVertexPick(button); break;
@@ -345,7 +350,7 @@ class HideLineApp {
     if (action === "deduction-show-eliminated") await this.updateDeductionPreference("showEliminated", event.target.checked);
     if (action === "deduction-show-zones") await this.updateDeductionPreference("showZones", event.target.checked);
     if (action === "deduction-show-area-mask") await this.updateDeductionPreference("showAreaMask", event.target.checked);
-    if (action === "deduction-area-constraint") await this.updateDeductionPreference("areaConstraintId", event.target.value || "latest");
+    if (action === "deduction-area-constraint") await this.setDeductionAreaConstraint(event.target.value || DEDUCTION_AREA_SELECTION_ALL);
     if (action === "deduction-endgame-station") {
       await this.updateDeductionPreference("endgameStationId", event.target.value || null);
       if (event.target.value) this.store.patch("ui.deductionSelectedStationId", event.target.value);
@@ -1086,11 +1091,63 @@ class HideLineApp {
     await this.mutateDeduction((roundState) => { roundState[key] = value; }, { history: false });
   }
 
+  async setDeductionMapDisplay(mode) {
+    const allowed = new Set(Object.values(DEDUCTION_MAP_MODES));
+    const nextMode = allowed.has(mode) ? mode : DEDUCTION_MAP_MODES.OVERVIEW;
+    if (nextMode !== DEDUCTION_MAP_MODES.ENDGAME) this.store.patch("ui.deductionSelectedStationId", null, { persist: true });
+    await this.mutateDeduction((roundState) => {
+      roundState.mapDisplayMode = nextMode;
+      if (nextMode === DEDUCTION_MAP_MODES.OVERVIEW) {
+        roundState.maskScope = "all";
+        roundState.showZones = true;
+      }
+      if (nextMode === DEDUCTION_MAP_MODES.ANSWER) {
+        roundState.maskScope = "all";
+        if (!roundState.areaConstraintId) roundState.areaConstraintId = DEDUCTION_AREA_SELECTION_ALL;
+      }
+    }, { history: false });
+  }
+
+  async showAllDeductionConstraints() {
+    this.store.patch("ui.deductionSelectedStationId", null, { persist: true });
+    await this.mutateDeduction((roundState) => {
+      roundState.mapDisplayMode = DEDUCTION_MAP_MODES.ANSWER;
+      roundState.areaConstraintId = DEDUCTION_AREA_SELECTION_ALL;
+      roundState.maskScope = "all";
+      roundState.showAreaMask = true;
+      roundState.showEliminated = true;
+    }, { history: false });
+  }
+
+  async setDeductionAreaConstraint(id) {
+    const nextId = id || DEDUCTION_AREA_SELECTION_ALL;
+    if (nextId === DEDUCTION_AREA_SELECTION_ALL) this.store.patch("ui.deductionSelectedStationId", null, { persist: true });
+    await this.mutateDeduction((roundState) => {
+      roundState.mapDisplayMode = DEDUCTION_MAP_MODES.ANSWER;
+      roundState.areaConstraintId = nextId;
+      roundState.showAreaMask = true;
+      if (nextId === DEDUCTION_AREA_SELECTION_ALL) roundState.maskScope = "all";
+    }, { history: false });
+  }
+
+  async exitDeductionEndgameView() {
+    this.store.patch("ui.deductionSelectedStationId", null, { persist: true });
+    await this.mutateDeduction((roundState) => {
+      roundState.mapDisplayMode = DEDUCTION_MAP_MODES.OVERVIEW;
+      roundState.endgameStationId = null;
+      roundState.maskScope = "all";
+      roundState.showZones = true;
+      roundState.showEliminated = true;
+    }, { history: false });
+  }
+
   async showDeductionConstraint(id) {
     if (!id) return;
+    this.store.patch("ui.deductionSelectedStationId", null, { persist: true });
     await this.mutateDeduction((roundState) => {
       roundState.mapDisplayMode = DEDUCTION_MAP_MODES.ANSWER;
       roundState.areaConstraintId = id;
+      roundState.maskScope = "all";
       roundState.showAreaMask = true;
     }, { history: false });
   }

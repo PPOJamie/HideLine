@@ -2,7 +2,7 @@
   "id": "./",
   "name": "HideLine - London Hide + Seek Companion",
   "short_name": "HideLine",
-  "description": "Detailed allowed/excluded map masks, all 55 linked questions, Endgame circle, timers, scoring and team sync for London transit hide-and-seek.",
+  "description": "Combined all-answer exclusion masks, all 55 linked questions, a resettable Endgame circle, timers, scoring and team sync for London transit hide-and-seek.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

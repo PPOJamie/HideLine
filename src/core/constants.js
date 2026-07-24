@@ -1,5 +1,5 @@
 export const APP_NAME = "HideLine";
-export const APP_VERSION = "1.2.0";
+export const APP_VERSION = "1.3.0";
 export const STORAGE_KEY = "hideline:v1:state";
 export const SETTINGS_KEY = "hideline:v1:settings";
 export const SUPABASE_MODULE_URL = "https://esm.sh/@supabase/supabase-js@2?bundle";

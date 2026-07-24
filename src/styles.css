@@ -985,6 +985,7 @@ select[multiple] option { padding: 7px 8px; border-radius: 7px; }
   gap: 11px;
 }
 .deduction-map-controls .grow { min-width: 0; }
+.endgame-exit-button { align-self: end; min-height: 43px; white-space: nowrap; }
 .endgame-area-readout {
   min-width: 142px;
   display: grid;
@@ -1027,7 +1028,8 @@ select[multiple] option { padding: 7px 8px; border-radius: 7px; }
 @media (max-width: 980px) {
   .deduction-map-controls.detailed-controls { grid-template-columns: minmax(0,1fr) minmax(150px,.45fr); }
   .deduction-map-controls.detailed-controls .toggle-row,
-  .deduction-map-controls.detailed-controls .endgame-area-readout { align-self: stretch; }
+  .deduction-map-controls.detailed-controls .endgame-area-readout,
+  .deduction-map-controls.detailed-controls .endgame-exit-button { align-self: stretch; }
 }
 
 @media (max-width: 620px) {
@@ -1036,7 +1038,8 @@ select[multiple] option { padding: 7px 8px; border-radius: 7px; }
   .deduction-map-controls.detailed-controls { display: flex; align-items: stretch; }
   .deduction-map-controls.detailed-controls .field,
   .deduction-map-controls.detailed-controls .toggle-row,
-  .deduction-map-controls.detailed-controls .endgame-area-readout { width: 100%; }
+  .deduction-map-controls.detailed-controls .endgame-area-readout,
+  .deduction-map-controls.detailed-controls .endgame-exit-button { width: 100%; }
   .deduction-map-shell, #deduction-map { min-height: 68vh; }
   .leaflet-area-mask-canvas { z-index: 420; }
 }

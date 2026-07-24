@@ -30,6 +30,8 @@ export const DEDUCTION_MAP_MODES = Object.freeze({
   ENDGAME: "endgame"
 });
 
+export const DEDUCTION_AREA_SELECTION_ALL = "all";
+
 export const DEDUCTION_TOOL_TYPES = Object.freeze({
   RADAR: "radar",
   THERMOMETER: "thermometer",
@@ -88,7 +90,7 @@ export function createDeductionRoundState() {
     showZones: true,
     showAreaMask: true,
     mapDisplayMode: DEDUCTION_MAP_MODES.OVERVIEW,
-    areaConstraintId: "latest",
+    areaConstraintId: DEDUCTION_AREA_SELECTION_ALL,
     endgameStationId: null,
     maskScope: "all",
     filter: "remaining",
@@ -97,9 +99,13 @@ export function createDeductionRoundState() {
 }
 
 export function normaliseDeductionRoundState(value = {}) {
+  const areaConstraintId = !value?.areaConstraintId || value.areaConstraintId === "latest"
+    ? DEDUCTION_AREA_SELECTION_ALL
+    : value.areaConstraintId;
   return {
     ...createDeductionRoundState(),
     ...(value || {}),
+    areaConstraintId,
     constraints: Array.isArray(value?.constraints) ? value.constraints : [],
     stationOverrides: value?.stationOverrides && typeof value.stationOverrides === "object" ? value.stationOverrides : {},
     ignoredAutoConstraintIds: Array.isArray(value?.ignoredAutoConstraintIds) ? value.ignoredAutoConstraintIds : [],
@@ -430,6 +436,14 @@ export function isAreaConstraint(constraint) {
   return AREA_TYPES.has(constraint?.type);
 }
 
+export function isStationConstraint(constraint) {
+  return STATION_LEVEL_TYPES.has(constraint?.type);
+}
+
+export function isMaskConstraint(constraint) {
+  return isAreaConstraint(constraint) || isStationConstraint(constraint);
+}
+
 export function constraintTitle(constraint) {
   if (constraint.label) return constraint.label;
   if (constraint.type === DEDUCTION_TOOL_TYPES.RADAR) return `${formatRadius(constraint.radiusMetres)} radar · ${titleCase(constraint.answer)}`;
@@ -546,8 +560,12 @@ export function evaluateStationPossibilities({
 
 /**
  * Build a cell-by-cell mask for one station. In `constraint` mode only the
- * selected answer is shown, which is the only truthful way to display a
- * pre-endgame snapshot. In `endgame` mode all locked answers are intersected.
+ * selected answer is shown. In `overlay` mode every supplied maskable answer
+ * is displayed together: a cell is grey when one or more ready answers exclude
+ * it, green only when every ready answer allows it, and amber when unresolved
+ * data prevents a definite result. This is a visual evidence overlay rather
+ * than a claim that a mobile hider stayed at one fixed point. In `endgame`
+ * mode all locked answers are intersected because the hiding spot is fixed.
  */
 export function evaluateZoneAreaMask({
   station,
@@ -563,6 +581,8 @@ export function evaluateZoneAreaMask({
   let selectedConstraints;
   if (mode === "endgame") {
     selectedConstraints = constraints.filter((constraint) => constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED && (AREA_TYPES.has(constraint.type) || STATION_LEVEL_TYPES.has(constraint.type)));
+  } else if (mode === "overlay") {
+    selectedConstraints = constraints.filter((constraint) => AREA_TYPES.has(constraint.type) || STATION_LEVEL_TYPES.has(constraint.type));
   } else {
     selectedConstraints = constraints.filter((constraint) => constraint.id === activeConstraintId);
   }
@@ -570,15 +590,41 @@ export function evaluateZoneAreaMask({
   const stationRuntimes = runtimes.filter((runtime) => STATION_LEVEL_TYPES.has(runtime.constraint.type));
   const areaRuntimes = runtimes.filter((runtime) => !STATION_LEVEL_TYPES.has(runtime.constraint.type));
   const stationGeo = STATION_GEO_BY_ID.get(station?.id) || station;
-  const stationFailed = stationRuntimes.some((runtime) => stationLevelPass(runtime.constraint, station, stationGeo) === false);
+  const stationResults = stationRuntimes.map((runtime) => stationLevelPass(runtime.constraint, station, stationGeo));
+  const stationFailureCount = stationResults.filter((value) => value === false).length;
+  const stationUnknownCount = stationResults.filter((value) => value === null).length;
+  const stationFailed = stationFailureCount > 0;
   const unresolved = runtimes.filter((runtime) => !runtime.ready).map((runtime) => `${constraintTitle(runtime.constraint)}: ${runtime.reason}`);
   const evaluatedCells = cells.map((cell) => {
-    if (stationFailed) return { ...cell, state: "excluded" };
-    if (!areaRuntimes.length) return { ...cell, state: unresolved.length ? "unknown" : "allowed" };
+    if (stationFailed) {
+      return {
+        ...cell,
+        state: "excluded",
+        excludedByCount: stationFailureCount,
+        allowedByCount: stationResults.filter((value) => value === true).length,
+        unknownByCount: stationUnknownCount + unresolved.length,
+        evaluatedCount: stationResults.filter((value) => value !== null).length
+      };
+    }
+    if (!areaRuntimes.length) {
+      const unknownByCount = stationUnknownCount + unresolved.length;
+      return {
+        ...cell,
+        state: unknownByCount ? "unknown" : "allowed",
+        excludedByCount: 0,
+        allowedByCount: stationResults.filter((value) => value === true).length,
+        unknownByCount,
+        evaluatedCount: stationResults.filter((value) => value !== null).length
+      };
+    }
     const values = areaRuntimes.map((runtime) => pointPassRuntime(runtime, cell.centre));
-    if (values.some((value) => value === false)) return { ...cell, state: "excluded" };
-    if (values.every((value) => value === true)) return { ...cell, state: "allowed" };
-    return { ...cell, state: "unknown" };
+    const excludedByCount = values.filter((value) => value === false).length;
+    const allowedByCount = values.filter((value) => value === true).length + stationResults.filter((value) => value === true).length;
+    const unknownByCount = values.filter((value) => value === null).length + stationUnknownCount + unresolved.length;
+    const evaluatedCount = values.filter((value) => value !== null).length + stationResults.filter((value) => value !== null).length;
+    if (excludedByCount) return { ...cell, state: "excluded", excludedByCount, allowedByCount, unknownByCount, evaluatedCount };
+    if (!unknownByCount && values.every((value) => value === true)) return { ...cell, state: "allowed", excludedByCount, allowedByCount, unknownByCount, evaluatedCount };
+    return { ...cell, state: "unknown", excludedByCount, allowedByCount, unknownByCount, evaluatedCount };
   });
   const allowed = evaluatedCells.filter((cell) => cell.state === "allowed").length;
   const excluded = evaluatedCells.filter((cell) => cell.state === "excluded").length;

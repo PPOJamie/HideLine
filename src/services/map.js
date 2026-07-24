@@ -29,6 +29,22 @@ const MASK_COLOURS = Object.freeze({
   unknown: { fill: "rgba(228, 161, 27, 0.30)", stroke: "rgba(151, 99, 0, 0.17)" }
 });
 
+function excludedCellOpacity(cell) {
+  const count = Math.max(1, Number(cell?.excludedByCount) || 1);
+  return Math.min(0.84, 0.48 + Math.log2(count + 1) * 0.1);
+}
+
+function maskCellPalette(cell) {
+  if (cell?.state === "excluded") {
+    const opacity = excludedCellOpacity(cell);
+    return {
+      fill: `rgba(78, 88, 101, ${opacity.toFixed(3)})`,
+      stroke: `rgba(42, 49, 58, ${Math.min(0.4, opacity * 0.48).toFixed(3)})`
+    };
+  }
+  return MASK_COLOURS[cell?.state] || MASK_COLOURS.unknown;
+}
+
 export function loadLeaflet() {
   if (window.L) return Promise.resolve(window.L);
   if (loadPromise) return loadPromise;
@@ -245,8 +261,8 @@ function drawConstraintOverlays(L, group, constraints, spatialFeatures = []) {
   }
 }
 
-function constraintSetForMode({ displayMode, constraints, activeConstraint }) {
-  if (displayMode === DEDUCTION_MAP_MODES.ANSWER) return activeConstraint ? [activeConstraint] : [];
+function constraintSetForMode({ displayMode, constraints, activeConstraint, answerConstraints = [] }) {
+  if (displayMode === DEDUCTION_MAP_MODES.ANSWER) return answerConstraints.length ? answerConstraints : activeConstraint ? [activeConstraint] : [];
   if (displayMode === DEDUCTION_MAP_MODES.ENDGAME) return (constraints || []).filter((constraint) => constraint.movementMode === "locked");
   return constraints || [];
 }
@@ -267,6 +283,8 @@ function buildAreaMaskPlans({
   results,
   constraints,
   activeConstraint,
+  answerConstraints = [],
+  answerSelectionAll = false,
   endgameStation,
   showEliminated,
   showAreaMask,
@@ -275,19 +293,32 @@ function buildAreaMaskPlans({
   spatialFeatures
 }) {
   if (!showAreaMask || displayMode === DEDUCTION_MAP_MODES.OVERVIEW) return [];
-  if (displayMode === DEDUCTION_MAP_MODES.ANSWER && !activeConstraint) return [];
+  const displayedAnswerConstraints = answerConstraints.length
+    ? answerConstraints
+    : activeConstraint
+      ? [activeConstraint]
+      : [];
+  if (displayMode === DEDUCTION_MAP_MODES.ANSWER && !displayedAnswerConstraints.length) return [];
   const targets = maskTargets({ displayMode, results, showEliminated, maskScope, selectedStationId, endgameStation });
   return targets.map((station) => {
-    const selected = station.id === selectedStationId || station.id === endgameStation?.id;
+    const selected = station.id === selectedStationId || (displayMode === DEDUCTION_MAP_MODES.ENDGAME && station.id === endgameStation?.id);
     const cellSizeMetres = displayMode === DEDUCTION_MAP_MODES.ENDGAME
       ? 22
       : maskScope === "selected" || selected
         ? 38
-        : 92;
+        : answerSelectionAll
+          ? 100
+          : 92;
+    const maskConstraints = displayMode === DEDUCTION_MAP_MODES.ENDGAME ? constraints : displayedAnswerConstraints;
+    const maskMode = displayMode === DEDUCTION_MAP_MODES.ENDGAME
+      ? "endgame"
+      : answerSelectionAll || displayedAnswerConstraints.length > 1
+        ? "overlay"
+        : "constraint";
     const mask = evaluateZoneAreaMask({
       station,
-      constraints,
-      mode: displayMode === DEDUCTION_MAP_MODES.ENDGAME ? "endgame" : "constraint",
+      constraints: maskConstraints,
+      mode: maskMode,
       activeConstraintId: activeConstraint?.id || null,
       spatialFeatures,
       radiusMetres: 500,
@@ -308,7 +339,7 @@ function attachAreaMaskCanvas(map, plans) {
   let frame = 0;
 
   const drawCell = (cell) => {
-    const palette = MASK_COLOURS[cell.state] || MASK_COLOURS.unknown;
+    const palette = maskCellPalette(cell);
     const points = cell.corners.map((corner) => map.latLngToContainerPoint([corner.lat, corner.lng]));
     context.beginPath();
     points.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y));
@@ -486,7 +517,7 @@ function vectorAreaMaskSvg(plans, projection = VECTOR_MAP) {
   const body = plans.map((plan, index) => {
     const cells = plan.mask.cells.map((cell) => {
       const fill = cell.state === "excluded" ? "#4e5865" : cell.state === "allowed" ? "#1e9d7e" : "#e4a11b";
-      const opacity = cell.state === "excluded" ? ".58" : ".30";
+      const opacity = cell.state === "excluded" ? excludedCellOpacity(cell).toFixed(3) : ".30";
       return `<polygon class="mask-cell-${cell.state}" points="${vectorPoints(cell.corners, projection)}" fill="${fill}" fill-opacity="${opacity}" stroke="${fill}" stroke-opacity=".17" stroke-width=".7" />`;
     }).join("");
     const centre = vectorPoint(plan.station, projection);
@@ -506,6 +537,8 @@ function renderDeductionVectorMap({
   displayMode = DEDUCTION_MAP_MODES.OVERVIEW,
   maskScope = "all",
   activeConstraint = null,
+  answerConstraints = [],
+  answerSelectionAll = false,
   endgameStation = null,
   spatialFeatures = [],
   selectedStationId = null,
@@ -517,12 +550,13 @@ function renderDeductionVectorMap({
     : results;
   const visible = sourceResults.filter((result) => showEliminated || result.status !== DEDUCTION_STATUS.ELIMINATED);
   const boundary = APPROXIMATE_GAME_BOUNDARY.map(([lng, lat]) => ({ lat, lng }));
-  const selectedStation = results.find((result) => result.id === selectedStationId) || endgameStation || null;
+  const selectedStation = results.find((result) => result.id === selectedStationId)
+    || (displayMode === DEDUCTION_MAP_MODES.ENDGAME ? endgameStation : null);
   const projection = vectorProjectionForMode({ displayMode, maskScope, selectedStation, endgameStation });
-  const plans = buildAreaMaskPlans({ displayMode, results, constraints, activeConstraint, endgameStation, showEliminated, showAreaMask, maskScope, selectedStationId, spatialFeatures });
+  const plans = buildAreaMaskPlans({ displayMode, results, constraints, activeConstraint, answerConstraints, answerSelectionAll, endgameStation, showEliminated, showAreaMask, maskScope, selectedStationId, spatialFeatures });
   const maskSvg = vectorAreaMaskSvg(plans, projection);
   const zoneSvg = visible.map((result) => {
-    const selected = result.id === selectedStationId || result.id === endgameStation?.id;
+    const selected = result.id === selectedStationId || (displayMode === DEDUCTION_MAP_MODES.ENDGAME && result.id === endgameStation?.id);
     if (displayMode === DEDUCTION_MAP_MODES.OVERVIEW && !showZones && !selected) return "";
     if (displayMode === DEDUCTION_MAP_MODES.ANSWER && maskScope === "selected" && !selected) return "";
     const centre = vectorPoint(result, projection);
@@ -534,11 +568,11 @@ function renderDeductionVectorMap({
   const markerSvg = visible.map((result) => {
     const centre = vectorPoint(result, projection);
     const palette = STATUS_COLOURS[result.status] || STATUS_COLOURS[DEDUCTION_STATUS.POSSIBLE];
-    const selected = result.id === selectedStationId || result.id === endgameStation?.id;
+    const selected = result.id === selectedStationId || (displayMode === DEDUCTION_MAP_MODES.ENDGAME && result.id === endgameStation?.id);
     const radius = selected ? 9 : result.status === DEDUCTION_STATUS.PRIORITY ? 7.5 : 5.5;
     return `<g class="vector-station" data-station-id="${escapeMapText(result.id)}"><circle cx="${centre.x}" cy="${centre.y}" r="${radius}" fill="${palette.fill}" fill-opacity="${result.status === DEDUCTION_STATUS.ELIMINATED ? ".58" : ".98"}" stroke="${selected ? "#0b1f33" : palette.stroke}" stroke-width="${selected ? 4 : 2}"><title>${escapeMapText(result.name)} - ${escapeMapText(statusDescription(result))}</title></circle>${selected ? `<text x="${centre.x + 13}" y="${centre.y - 10}" class="vector-station-label">${escapeMapText(result.name)}</text>` : ""}</g>`;
   }).join("");
-  const modeConstraints = constraintSetForMode({ displayMode, constraints, activeConstraint });
+  const modeConstraints = constraintSetForMode({ displayMode, constraints, activeConstraint, answerConstraints });
   const thames = vectorPoints(THAMES_CENTRELINE, projection);
   const showPlanningContext = displayMode !== DEDUCTION_MAP_MODES.ENDGAME;
   container.innerHTML = `
@@ -593,6 +627,8 @@ export async function renderDeductionMap({
   displayMode = DEDUCTION_MAP_MODES.OVERVIEW,
   maskScope = "all",
   activeConstraint = null,
+  answerConstraints = [],
+  answerSelectionAll = false,
   endgameStation = null,
   spatialFeatures = [],
   selectedStationId = null,
@@ -606,7 +642,7 @@ export async function renderDeductionMap({
   try {
     L = await loadLeaflet();
   } catch (error) {
-    return renderDeductionVectorMap({ container, results, constraints, showEliminated, showZones, showAreaMask, displayMode, maskScope, activeConstraint, endgameStation, spatialFeatures, selectedStationId, message: error.message });
+    return renderDeductionVectorMap({ container, results, constraints, showEliminated, showZones, showAreaMask, displayMode, maskScope, activeConstraint, answerConstraints, answerSelectionAll, endgameStation, spatialFeatures, selectedStationId, message: error.message });
   }
 
   const endgameMode = displayMode === DEDUCTION_MAP_MODES.ENDGAME;
@@ -618,7 +654,7 @@ export async function renderDeductionMap({
     markers: L.layerGroup().addTo(deductionMapInstance)
   };
 
-  const modeConstraints = constraintSetForMode({ displayMode, constraints, activeConstraint });
+  const modeConstraints = constraintSetForMode({ displayMode, constraints, activeConstraint, answerConstraints });
   drawConstraintOverlays(L, deductionLayerGroups.overlays, modeConstraints, spatialFeatures);
 
   const sourceResults = endgameMode ? (endgameStation ? [endgameStation] : []) : results;
@@ -628,7 +664,7 @@ export async function renderDeductionMap({
     if (!Number.isFinite(Number(result.lat)) || !Number.isFinite(Number(result.lng))) continue;
     const centre = [Number(result.lat), Number(result.lng)];
     const palette = STATUS_COLOURS[result.status] || STATUS_COLOURS[DEDUCTION_STATUS.POSSIBLE];
-    const selected = result.id === selectedStationId || result.id === endgameStation?.id;
+    const selected = result.id === selectedStationId || (endgameMode && result.id === endgameStation?.id);
     const showCircle = endgameMode
       || (displayMode === DEDUCTION_MAP_MODES.ANSWER ? maskScope !== "selected" || selected : showZones || selected);
     if (showCircle) {
@@ -665,7 +701,7 @@ export async function renderDeductionMap({
     bounds.push(centre);
   }
 
-  const plans = buildAreaMaskPlans({ displayMode, results, constraints, activeConstraint, endgameStation, showEliminated, showAreaMask, maskScope, selectedStationId, spatialFeatures });
+  const plans = buildAreaMaskPlans({ displayMode, results, constraints, activeConstraint, answerConstraints, answerSelectionAll, endgameStation, showEliminated, showAreaMask, maskScope, selectedStationId, spatialFeatures });
   deductionMaskLayer = attachAreaMaskCanvas(deductionMapInstance, plans);
 
   deductionMapInstance.on("click", (event) => {

@@ -1,6 +1,7 @@
 import { DEFAULT_DURATIONS, PHASES } from "../core/constants.js";
 import { escapeHtml } from "../core/format.js";
 import {
+  DEDUCTION_AREA_SELECTION_ALL,
   DEDUCTION_MAP_MODES,
   DEDUCTION_MOVEMENT,
   DEDUCTION_STATUS,
@@ -11,7 +12,7 @@ import {
   deriveAutomaticConstraints,
   evaluateStationPossibilities,
   evaluateZoneAreaMask,
-  isAreaConstraint,
+  isMaskConstraint,
   lineName,
   normaliseDeductionRoundState
 } from "../core/deduction.js";
@@ -87,10 +88,17 @@ export function buildDeductionViewModel(state) {
     radiusMetres: DEFAULT_DURATIONS.hidingZoneRadiusMetres,
     spatialFeatures: spatialData.features
   });
-  const areaConstraints = constraints.filter(isAreaConstraint);
-  const activeAreaConstraint = roundState.areaConstraintId && roundState.areaConstraintId !== "latest"
-    ? areaConstraints.find((constraint) => constraint.id === roundState.areaConstraintId) || areaConstraints.at(-1) || null
-    : areaConstraints.at(-1) || null;
+  const areaConstraints = constraints.filter(isMaskConstraint);
+  const requestedAreaConstraint = areaConstraints.find((constraint) => constraint.id === roundState.areaConstraintId) || null;
+  const areaSelectionAll = roundState.areaConstraintId === DEDUCTION_AREA_SELECTION_ALL || !requestedAreaConstraint;
+  const activeAreaConstraint = areaSelectionAll
+    ? null
+    : requestedAreaConstraint;
+  const answerConstraints = areaSelectionAll
+    ? areaConstraints
+    : activeAreaConstraint
+      ? [activeAreaConstraint]
+      : [];
   const remaining = results.filter((result) => result.possible);
   const selectedCandidate = results.find((result) => result.id === roundState.endgameStationId)
     || results.find((result) => result.id === state.ui.deductionSelectedStationId)
@@ -117,7 +125,9 @@ export function buildDeductionViewModel(state) {
     manual,
     constraints,
     areaConstraints,
+    areaSelectionAll,
     activeAreaConstraint,
+    answerConstraints,
     results,
     remaining,
     endgameStation: selectedCandidate,
@@ -382,7 +392,7 @@ function renderConstraintList(model) {
     ...model.roundState.constraints.map((constraint) => ({ ...constraint, auto: false, ignored: constraint.enabled === false }))
   ];
   return `<section class="card card-pad stack">
-    <div class="section-head"><div><p class="eyebrow">Audit trail</p><h2>Linked answers</h2><p>Every handbook question can now appear here. Automatic geometry runs when its required layer exists; judgement-based clues remain explicit rather than guessed.</p></div><button class="button button-soft button-small" type="button" data-action="deduction-undo" ${model.roundState.undoStack?.length ? "" : "disabled"}>${icon("undo")} Undo</button></div>
+    <div class="section-head"><div><p class="eyebrow">Audit trail</p><h2>Linked answers</h2><p>Every handbook question can now appear here. Automatic geometry runs when its required layer exists; judgement-based clues remain explicit rather than guessed.</p></div><div class="button-row compact"><button class="button button-soft button-small" type="button" data-action="deduction-show-all-constraints" ${model.areaConstraints.length ? "" : "disabled"}>${icon("layers")} Show all areas</button><button class="button button-soft button-small" type="button" data-action="deduction-undo" ${model.roundState.undoStack?.length ? "" : "disabled"}>${icon("undo")} Undo</button></div></div>
     ${items.length ? `<div class="deduction-constraint-list">${items.map((constraint) => {
       const resolution = model.resolutions.get(constraint.id) || { ready: false, reason: "Ignored" };
       const stateBadge = constraint.ignored
@@ -394,7 +404,7 @@ function renderConstraintList(model) {
             : '<span class="badge badge-warning">Needs map data</span>';
       return `<article class="deduction-constraint ${constraint.ignored ? "ignored" : ""}">
         <div class="deduction-constraint-main"><div class="row gap-sm wrap"><span class="badge ${constraint.auto ? "badge-blue" : "badge-neutral"}">${constraint.auto ? "Question" : "Manual"}</span><span class="badge ${constraint.movementMode === "locked" ? "badge-purple" : "badge-mint"}">${constraint.movementMode === "locked" ? "Endgame locked" : "Mobile snapshot"}</span>${stateBadge}</div><strong>${escapeHtml(constraintTitle(constraint))}</strong><span class="tiny muted">${constraintDetails(constraint)}</span>${!constraint.ignored && !resolution.ready ? `<span class="tiny warning-text">${escapeHtml(resolution.reason || "Not yet resolved")}</span>` : ""}</div>
-        <div class="button-column compact">${!constraint.ignored && isAreaConstraint(constraint) ? `<button class="button button-soft button-small" type="button" data-action="deduction-show-constraint" data-id="${escapeHtml(constraint.id)}">${icon("eye")} Show area</button>` : ""}<button class="button button-soft button-small" type="button" data-action="${constraint.auto ? "deduction-toggle-auto" : "deduction-remove-constraint"}" data-id="${escapeHtml(constraint.id)}">${icon(constraint.auto && constraint.ignored ? "eye" : constraint.auto ? "eyeOff" : "trash")} ${constraint.auto ? (constraint.ignored ? "Use" : "Ignore") : "Remove"}</button></div>
+        <div class="button-column compact">${!constraint.ignored && isMaskConstraint(constraint) ? `<button class="button button-soft button-small" type="button" data-action="deduction-show-constraint" data-id="${escapeHtml(constraint.id)}">${icon("eye")} Show area</button>` : ""}<button class="button button-soft button-small" type="button" data-action="${constraint.auto ? "deduction-toggle-auto" : "deduction-remove-constraint"}" data-id="${escapeHtml(constraint.id)}">${icon(constraint.auto && constraint.ignored ? "eye" : constraint.auto ? "eyeOff" : "trash")} ${constraint.auto ? (constraint.ignored ? "Use" : "Ignore") : "Remove"}</button></div>
       </article>`;
     }).join("")}</div>` : `<div class="empty-state" style="min-height:150px"><div class="empty-state-inner"><span class="empty-icon">${icon("filter")}</span><strong>No linked answers yet</strong><span>Ask a question or add a tool above.</span></div></div>`}
     <div class="button-row"><button class="button button-danger button-small" type="button" data-action="deduction-reset">${icon("refresh")} Reset round map</button></div>
@@ -460,14 +470,14 @@ function renderMapControls(model) {
   const mode = model.roundState.mapDisplayMode;
   if (mode === DEDUCTION_MAP_MODES.ANSWER) {
     return `<div class="deduction-map-controls detailed-controls">
-      <div class="field grow"><label for="deduction-area-constraint">Answer layer</label><select id="deduction-area-constraint" data-action="deduction-area-constraint">${model.areaConstraints.length ? model.areaConstraints.map((constraint) => `<option value="${constraint.id}" ${model.activeAreaConstraint?.id === constraint.id ? "selected" : ""}>${escapeHtml(constraintTitle(constraint))}</option>`).join("") : '<option value="">No area-producing answers yet</option>'}</select></div>
+      <div class="field grow"><label for="deduction-area-constraint">Displayed evidence</label><select id="deduction-area-constraint" data-action="deduction-area-constraint"><option value="${DEDUCTION_AREA_SELECTION_ALL}" ${model.areaSelectionAll ? "selected" : ""}>All linked answers — combined overlay (${model.areaConstraints.length})</option>${model.areaConstraints.length ? `<optgroup label="Individual answer">${model.areaConstraints.map((constraint) => `<option value="${constraint.id}" ${model.activeAreaConstraint?.id === constraint.id ? "selected" : ""}>${escapeHtml(constraintTitle(constraint))}</option>`).join("")}</optgroup>` : ""}</select><span class="field-hint">The combined view greys every cell excluded by one or more ready answers. Choose one answer for a clean single-question mask.</span></div>
       <div class="field"><label for="deduction-mask-scope">Cell detail</label><select id="deduction-mask-scope" data-action="deduction-mask-scope"><option value="all" ${model.roundState.maskScope === "all" ? "selected" : ""}>All visible circles</option><option value="selected" ${model.roundState.maskScope === "selected" ? "selected" : ""}>Selected station only</option></select></div>
-      <label class="toggle-row"><input type="checkbox" data-action="deduction-show-area-mask" ${model.roundState.showAreaMask ? "checked" : ""} /><span>Grey impossible cells</span></label>
+      <label class="toggle-row"><input type="checkbox" data-action="deduction-show-area-mask" ${model.roundState.showAreaMask ? "checked" : ""} /><span>Show excluded cells</span></label>
       <label class="toggle-row"><input type="checkbox" data-action="deduction-show-eliminated" ${model.roundState.showEliminated ? "checked" : ""} /><span>Show eliminated stations</span></label>
     </div>`;
   }
   if (mode === DEDUCTION_MAP_MODES.ENDGAME) {
-    const lockedAreaConstraints = model.constraints.filter((constraint) => constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED && isAreaConstraint(constraint));
+    const lockedAreaConstraints = model.constraints.filter((constraint) => constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED && isMaskConstraint(constraint));
     const fraction = model.endgameMask?.allowedFraction;
     const unresolved = model.endgameMask?.unresolved?.length || 0;
     const areaLabel = !lockedAreaConstraints.length
@@ -482,6 +492,7 @@ function renderMapControls(model) {
         : `${model.endgameMask?.allowed || 0} of ${model.endgameMask?.total || 0} cells`;
     return `<div class="deduction-map-controls detailed-controls">
       <div class="field grow"><label for="deduction-endgame-station">Endgame station circle</label><select id="deduction-endgame-station" data-action="deduction-endgame-station">${endgameStationOptions(model)}</select><span class="field-hint">All 100 stations remain selectable so a mistaken earlier deduction cannot block the real endgame circle.</span></div>
+      <button class="button button-soft endgame-exit-button" type="button" data-action="deduction-exit-endgame">${icon("map")} Show all circles</button>
       <label class="toggle-row"><input type="checkbox" data-action="deduction-show-area-mask" ${model.roundState.showAreaMask ? "checked" : ""} /><span>Grey excluded parts</span></label>
       <div class="endgame-area-readout"><span>Approx. area remaining</span><strong>${areaLabel}</strong><small>${escapeHtml(areaNote)}</small></div>
     </div>`;
@@ -492,13 +503,32 @@ function renderMapControls(model) {
 function mapExplanation(model) {
   const mode = model.roundState.mapDisplayMode;
   if (mode === DEDUCTION_MAP_MODES.ANSWER) {
-    return `<div class="callout">${icon("filter")}<p><strong>One truthful snapshot.</strong>${model.activeAreaConstraint ? `The grey cells could not have produced “${escapeHtml(model.activeAreaConstraint.answerFeatureName || model.activeAreaConstraint.answer || "the answer")}" for this specific question.` : "Choose an area-producing answer."} Pre-endgame answers are not intersected because the hider may have moved between questions.</p></div>`;
+    if (model.areaSelectionAll) {
+      if (!model.answerConstraints.length) {
+        return `<div class="callout warning">${icon("info")}<p><strong>No map-ready answers yet.</strong>Ask a structured question, enable its deduction fields, or add a manual area. The combined overlay will update automatically as answers are linked.</p></div>`;
+      }
+      const mobile = model.answerConstraints.filter((constraint) => constraint.movementMode !== DEDUCTION_MOVEMENT.LOCKED).length;
+      const locked = model.answerConstraints.length - mobile;
+      return `<div class="callout">${icon("layers")}<p><strong>All exclusions at once.</strong>Grey means at least one of the ${model.answerConstraints.length} displayed answer${model.answerConstraints.length === 1 ? "" : "s"} excludes that cell; darker grey means several answers exclude it. Green survives every ready displayed answer at that coordinate, and amber still needs data or review.${mobile ? ` The ${mobile} mobile snapshot${mobile === 1 ? " is" : "s are"} overlaid for planning only—the station engine still allows the hider to move between answers.` : ""}${locked ? ` ${locked} endgame-locked answer${locked === 1 ? " is" : "s are"} also shown.` : ""}</p></div>`;
+    }
+    return `<div class="callout">${icon("filter")}<p><strong>One truthful snapshot.</strong>${model.activeAreaConstraint ? `The grey cells could not have produced “${escapeHtml(model.activeAreaConstraint.answerFeatureName || model.activeAreaConstraint.answer || "the answer")}" for this specific question.` : "Choose an answer."} Pre-endgame station viability remains movement-aware because the hider may have moved between questions.</p></div>`;
   }
   if (mode === DEDUCTION_MAP_MODES.ENDGAME) {
-    const locked = model.constraints.filter((constraint) => constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED && isAreaConstraint(constraint)).length;
+    const locked = model.constraints.filter((constraint) => constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED && isMaskConstraint(constraint)).length;
     return `<div class="callout ${locked ? "" : "warning"}">${icon(locked ? "target" : "info")}<p><strong>Fixed hiding spot.</strong>${locked ? `${locked} endgame-locked area answer${locked === 1 ? " is" : "s are"} intersected inside only the selected 500 m station circle.` : "No endgame-locked area answer has narrowed this circle yet. New questions answered during Endgame are locked automatically."}</p></div>`;
   }
   return `<div class="callout">${icon("info")}<p><strong>Station viability.</strong>Green means the full sampled zone survives, amber means at least one answer cuts through it, grey means the station is ruled out, and purple is a seeker priority. Open Answer Areas to see which exact part of an amber circle survived a chosen answer.</p></div>`;
+}
+
+function renderMapLegend(model) {
+  const mode = model.roundState.mapDisplayMode;
+  if (mode === DEDUCTION_MAP_MODES.ANSWER && model.areaSelectionAll) {
+    return `<div class="deduction-legend" aria-label="Map legend"><span class="legend-possible">Allowed by all shown answers</span><span class="legend-partial">Unresolved / needs data</span><span class="legend-priority">Priority station</span><span class="legend-eliminated">Excluded by 1+ answers</span></div>`;
+  }
+  if (mode === DEDUCTION_MAP_MODES.ENDGAME) {
+    return `<div class="deduction-legend" aria-label="Map legend"><span class="legend-possible">Remaining fixed-spot area</span><span class="legend-partial">Unresolved / needs data</span><span class="legend-priority">Selected station</span><span class="legend-eliminated">Excluded by locked answers</span></div>`;
+  }
+  return `<div class="deduction-legend" aria-label="Map legend"><span class="legend-possible">Allowed area</span><span class="legend-partial">Unknown / partial</span><span class="legend-priority">Priority</span><span class="legend-eliminated">Excluded area</span></div>`;
 }
 
 export function renderDeductionView(state) {
@@ -515,9 +545,9 @@ export function renderDeductionView(state) {
 
     <div class="grid deduction-map-grid">
       <section class="card card-pad stack deduction-map-card">
-        <div class="section-head"><div><h2>${roundState.mapDisplayMode === "endgame" ? "Endgame circle" : roundState.mapDisplayMode === "answer" ? "Answer-area mask" : "Station possibility map"}</h2><p>${roundState.mapDisplayMode === "endgame" ? "Only the chosen station's 500 m circle is shown." : roundState.mapDisplayMode === "answer" ? "Grey cells are excluded by the selected answer; green cells remain possible for that moment." : "Use the map as the overview, then inspect partial areas or switch to the fixed-spot Endgame view."}</p></div></div>
+        <div class="section-head"><div><h2>${roundState.mapDisplayMode === "endgame" ? "Endgame circle" : roundState.mapDisplayMode === "answer" ? "Answer-area mask" : "Station possibility map"}</h2><p>${roundState.mapDisplayMode === "endgame" ? "Only the chosen station's 500 m circle is shown." : roundState.mapDisplayMode === "answer" ? (model.areaSelectionAll ? "All ready linked answers are overlaid so every excluded part is visible together." : "Grey cells are excluded by the selected answer; green cells remain possible for that moment.") : "Use the map as the overview, then inspect partial areas or switch to the fixed-spot Endgame view."}</p></div></div>
         ${mapModeTabs(roundState)}${renderMapControls(model)}${mapExplanation(model)}
-        <div class="map-shell deduction-map-shell"><div id="deduction-map" role="application" aria-label="Live station deduction map"></div><div class="deduction-legend" aria-label="Map legend"><span class="legend-possible">Allowed area</span><span class="legend-partial">Unknown / partial</span><span class="legend-priority">Priority</span><span class="legend-eliminated">Excluded area</span></div></div>
+        <div class="map-shell deduction-map-shell"><div id="deduction-map" role="application" aria-label="Live station deduction map"></div>${renderMapLegend(model)}</div>
         <p class="tiny muted">Cell masks are a high-resolution planning aid clipped to each 500 m circle. Check the authoritative game map for borderline paths, entrances and curated-layer disputes.</p>
       </section>
       <aside class="stack deduction-side">${renderTool(state)}${renderConstraintList(model)}</aside>
