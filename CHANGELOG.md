@@ -2,6 +2,16 @@
 
 All notable changes to HideLine are documented here.
 
+## 2.3.1 — Water-edge picker and administrative-boundary repair
+
+- Added a dedicated Body of Water map picker that can snap a mapped water polygon to its nearest shoreline point from the seeker pin.
+- Added manual shoreline selection and water naming for canals, docks, lakes or basins missing from the imported map list; seeker distance is calculated and retained automatically.
+- Kept manually selected shoreline clues explicit and auditable instead of applying unsafe automatic eliminations from an incomplete water dataset.
+- Replaced the retired London-borough request and failing ward query with fixed official ONS `FeatureServer/0/query` endpoints and client-side London code filtering.
+- Simplified boundary queries to `where=1=1` plus a Central London spatial envelope, avoiding the SQL expression that could return HTTP 400.
+- Added automatic GeoJSON-to-ArcGIS-JSON fallback, HTML/error-response validation, invalid-cache removal and per-layer status reporting.
+- Bumped the PWA shell and deployment guard to 2.3.1. No Supabase migration is required.
+
 ## 2.3.0 — Game-day reliability, measuring clarity and built-in boundaries
 
 - Fixed custom rounds starting part-way through by making **Start now** use the exact button-press timestamp and moving scheduled clock times behind an explicit option with second precision.

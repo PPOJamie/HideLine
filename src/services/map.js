@@ -359,6 +359,8 @@ function renderCoordinatePickerFallback(container, initialPoint, onChange, messa
 export async function renderCoordinatePickerMap({
   containerId = "coordinate-picker-map",
   initialPoint = LONDON_MAP_CENTRE,
+  referenceFeatures = [],
+  referenceLabel = "Mapped reference features",
   onChange
 } = {}) {
   destroyCoordinatePickerMap();
@@ -373,6 +375,23 @@ export async function renderCoordinatePickerMap({
   }
   coordinatePickerMapInstance = L.map(container, { zoomControl: true, attributionControl: true }).setView([point.lat, point.lng], 15);
   addBaseMap(L, coordinatePickerMapInstance);
+  if (Array.isArray(referenceFeatures) && referenceFeatures.length) {
+    const collection = {
+      type: "FeatureCollection",
+      features: referenceFeatures
+        .filter((feature) => feature?.geometry)
+        .map((feature) => ({ type: "Feature", geometry: feature.geometry, properties: { id: feature.id, name: feature.name } }))
+    };
+    try {
+      L.geoJSON(collection, {
+        style: { color: "#166ea7", weight: 3, opacity: 0.9, fillColor: "#54b7e8", fillOpacity: 0.24 },
+        pointToLayer: (_feature, latlng) => L.circleMarker(latlng, { radius: 7, color: "#0d4d75", fillColor: "#67c7f2", fillOpacity: 0.95, weight: 3 }),
+        onEachFeature: (feature, layer) => layer.bindTooltip(escapeMapText(feature.properties?.name || referenceLabel), { sticky: true })
+      }).addTo(coordinatePickerMapInstance);
+    } catch (error) {
+      console.warn(`${referenceLabel} could not be drawn in the coordinate picker`, error);
+    }
+  }
   // The OpenStreetMap basemap already contains the actual Thames banks. Do
   // not add a second approximate river line here: it can visually spill onto
   // land when zoomed in and is unnecessary for choosing a coordinate.

@@ -26,7 +26,7 @@ test("legacy Game markup remains readable during a mixed-cache PWA upgrade", () 
   }
 });
 
-test("the 2.3.0 service worker precaches the Game renderer in a new shell", () => {
-  assert.match(serviceWorker, /hideline-shell-v2\.3\.0/);
+test("the 2.3.1 service worker precaches the Game renderer in a new shell", () => {
+  assert.match(serviceWorker, /hideline-shell-v2\.3\.1/);
   assert.match(serviceWorker, /"\.\/src\/ui\/play\.js"/);
 });

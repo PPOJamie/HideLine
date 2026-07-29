@@ -247,6 +247,25 @@ function featureReferenceSelect(features, config, question) {
   return `<div class="field reference-feature-field"><label for="deduction-reference-feature">${escapeHtml(label)}</label><select id="deduction-reference-feature" name="deductionReferenceFeatureId" data-reference-category="${escapeHtml(config.category)}"><option value="">Choose automatically from the seeker pin</option>${sorted.map((feature) => `<option value="${escapeHtml(feature.id)}">${escapeHtml(feature.name)}</option>`).join("")}</select><span class="field-hint">HideLine automatically selects the nearest valid map feature when this is left blank. Choose one to resolve an ambiguous pin or confirm the exact handbook layer item.</span></div>`;
 }
 
+function waterReferenceFields(features) {
+  const sorted = [...features].sort((a, b) => a.name.localeCompare(b.name));
+  const options = sorted.map((feature) => `<option value="${escapeHtml(feature.id)}">${escapeHtml(feature.name)}</option>`).join("");
+  return `<section class="water-reference-picker" data-water-reference-picker>
+    <div class="water-reference-heading"><span class="water-reference-icon">${icon("measure")}</span><div><strong>Choose the nearest named body of water</strong><p>Select a mapped water body, or tap the correct shoreline on the map when the list is incomplete. HideLine calculates the seeker's distance automatically.</p></div></div>
+    ${sorted.length ? `<div class="field reference-feature-field"><label for="deduction-reference-feature">Mapped body of water</label><select id="deduction-reference-feature" name="deductionReferenceFeatureId" data-action="water-reference-feature" data-reference-category="water"><option value="">Choose automatically from the seeker pin</option>${options}</select><span class="field-hint">Selecting a water body snaps the orange reference point to the closest edge of that water body from the seeker pin.</span></div>` : `<div class="callout warning">${icon("info")}<p>No named water polygons are loaded. You can still select the shoreline manually and name it below; HideLine will show the exact distance but will not make unsafe automatic eliminations from an incomplete water layer.</p></div>`}
+    <div class="field"><label for="deduction-water-name">Water name shown to the hiders</label><input id="deduction-water-name" name="deductionWaterName" maxlength="120" placeholder="e.g. The Serpentine, Regent's Canal, West India Dock" data-action="water-reference-name" /><span class="field-hint">Required for a manually selected shoreline. A mapped selection fills this automatically.</span></div>
+    <input type="hidden" name="deductionWaterPointLat" value="" />
+    <input type="hidden" name="deductionWaterPointLng" value="" />
+    <div class="water-reference-actions"><button class="button button-primary" type="button" data-action="coordinate-picker-open" data-prefix="deductionWaterPoint" data-label="Nearest point on the named body of water" data-picker-mode="water-edge" data-seeker-prefix="deductionSeeker">${icon("map")} Pick nearest water edge from map</button></div>
+    <div class="coordinate-selection-summary water-reference-summary" data-coordinate-summary="deductionWaterPoint" data-water-reference-summary>
+      ${icon("location")}<span>No shoreline point selected yet</span>
+      <a class="coordinate-preview-link" data-coordinate-preview="deductionWaterPoint" target="_blank" rel="noopener noreferrer" hidden>Open in Google Maps ${icon("external")}</a>
+      <small data-water-reference-distance>Choose the seeker pin first, then select a water body or shoreline.</small>
+    </div>
+    <div class="callout water-rule-note">${icon("info")}<p><strong>Handbook method:</strong> measure to the nearest edge of a named blue-shaded body of water, excluding swimming pools and fountains. The hiders compare this with their own nearest valid water edge.</p></div>
+  </section>`;
+}
+
 function deductionLineOptions() {
   const groups = new Map();
   for (const line of RAIL_LINES) {
@@ -283,12 +302,14 @@ function questionDeductionFields(state, question) {
     fields = deductionCoordinateFields("deductionSeeker", "Seeker pin used for this question", current);
   }
 
-  fields += featureReferenceSelect(categoryFeatures, config, question);
+  fields += question.id === "measuring-water"
+    ? waterReferenceFields(categoryFeatures)
+    : featureReferenceSelect(categoryFeatures, config, question);
   if (config.type === "tentacle" && categoryCount) {
     fields += `<div class="callout success">${icon("check")}<p>HideLine will build the hider's answer drop-down from the ${categoryCount} mapped ${escapeHtml(spatialCategoryLabel(config.category).toLowerCase())} and keep only those within 2 km of the seeker pin.</p></div>`;
   }
 
-  const dataNote = config.category && !categoryCount
+  const dataNote = config.category && !categoryCount && question.id !== "measuring-water"
     ? `<div class="callout warning map-data-question-warning">${icon("info")}<div><p>This question needs ${escapeHtml(config.dataLabel || spatialCategoryLabel(config.category))}. Borough, ward and constituency polygons load from HideLine's built-in official sources; curated POIs come from the supplied game map.</p><button class="button button-soft button-small" type="button" data-action="spatial-data-load-configured">${icon("download")} Load official game map</button></div></div>`
     : config.category
       ? `<p class="tiny muted">${categoryCount} matching map features are ready.</p>`

@@ -289,6 +289,20 @@ function prepareConstraint(constraint, context = {}) {
     return polygonReady || circleReady ? runtime : { ...runtime, ready: false, reason: "The manual area has no valid polygon or circle." };
   }
 
+  if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE && constraint.manualReference && !constraint.referenceFeatureId) {
+    const seeker = finitePoint(constraint.seeker);
+    if (!seeker) return { ...runtime, ready: false, manual: true, reason: "The seeker's pin is missing." };
+    return {
+      ...runtime,
+      ready: false,
+      manual: true,
+      referencePoint: finitePoint(constraint.referencePoint),
+      seekerDistanceMetres: Number.isFinite(Number(constraint.seekerDistanceMetres)) ? Number(constraint.seekerDistanceMetres) : null,
+      measurementMethod: constraint.measurementMethod || "player-confirmed shoreline point",
+      reason: "The exact seeker shoreline and distance are recorded. Safe automatic elimination needs a complete named body-of-water layer, so this player-selected reference remains a visible review clue."
+    };
+  }
+
   if ([
     DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH,
     DEDUCTION_TOOL_TYPES.REGION_MATCH,
@@ -770,6 +784,8 @@ function automaticConstraint(question) {
       referencePoint: finitePoint(input.referencePoint),
       seekerDistanceMetres: Number.isFinite(storedDistance) ? storedDistance : null,
       measurementMethod: input.measurementMethod || null,
+      manualReference: Boolean(input.manualReference),
+      referenceSource: input.referenceSource || null,
       answer
     };
   }

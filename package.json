@@ -1,8 +1,8 @@
 {
   "name": "hideline-london-companion",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "private": true,
-  "description": "A game-day-tested London hide-and-seek companion with reliable timers, persistent question pins, clear measuring references, built-in administrative boundaries and real-time multiplayer sync.",
+  "description": "A London hide-and-seek companion with reliable water-edge measurements, resilient official administrative boundaries, precise timers and real-time multiplayer sync.",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev-server.mjs",

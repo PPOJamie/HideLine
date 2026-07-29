@@ -851,7 +851,12 @@ class HideLineApp {
     const action = event.target.dataset.action;
     if (event.target.closest?.("#app-modal form")) this.captureModalDraft();
     const coordinateMatch = String(event.target.name || "").match(/^(.*)(Lat|Lng)$/);
-    if (coordinateMatch) this.updateCoordinateSummary(event.target.closest("form"), coordinateMatch[1]);
+    if (coordinateMatch) {
+      const form = event.target.closest("form");
+      this.updateCoordinateSummary(form, coordinateMatch[1]);
+      if (coordinateMatch[1] === "deductionSeeker" && form?.querySelector("[data-water-reference-picker]")) this.refreshWaterReference(form);
+    }
+    if (action === "water-reference-name") this.updateWaterReferenceSummary(event.target.closest("form"));
     if (action === "question-search") this.debouncedPatch("ui.questionSearch", event.target.value);
     if (action === "station-filter") this.debouncedPatch("ui.stationSearch", event.target.value);
     if (action === "deduction-search") this.debouncedPatch("ui.deductionSearch", event.target.value);
@@ -882,6 +887,7 @@ class HideLineApp {
       const details = event.target.closest(".deduction-question-fields");
       details?.querySelectorAll(".deduction-auto-fields input, .deduction-auto-fields select, .deduction-auto-fields button").forEach((control) => { control.disabled = !event.target.checked; });
     }
+    if (action === "water-reference-feature") this.selectWaterReferenceFeature(event.target);
   }
 
   debouncedPatch(path, value) {
@@ -1404,19 +1410,21 @@ class HideLineApp {
       phase: state.game?.phase || PHASES.SEEKING,
       deductionInput,
       answerChoices: Array.isArray(deductionInput?.answerChoices) ? deductionInput.answerChoices : [],
-      mapReference: deductionInput?.referenceFeatureId ? (() => {
+      mapReference: (deductionInput?.referenceFeatureId || deductionInput?.referencePoint) ? (() => {
         const category = deductionInput.referenceCategory || deductionInput.category || "unknown";
         const categoryLabel = spatialCategoryLabel(category).toLowerCase();
         const type = deductionInput.type || "mapped-reference";
         const explanation = type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE
-          ? `The seeker distance is measured to the exact orange point shown. Hider locations are compared with their own nearest valid ${categoryLabel}.`
+          ? deductionInput.manualReference
+            ? `The orange point is the shoreline selected by the players. HideLine records the seeker distance exactly; automatic area elimination remains conservative until a complete named ${categoryLabel} layer is available.`
+            : `The seeker distance is measured to the exact orange point shown. Hider locations are compared with their own nearest valid ${categoryLabel}.`
           : type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH
             ? `This is the seeker's nearest valid ${categoryLabel}. The hider answers whether their own nearest valid place is the same.`
             : type === DEDUCTION_TOOL_TYPES.REGION_MATCH
               ? `This is the official boundary containing the seeker pin. The hider answers whether their current location is in the same area.`
               : "This mapped feature is the reference used by the deduction map.";
         return {
-          id: deductionInput.referenceFeatureId,
+          id: deductionInput.referenceFeatureId || null,
           name: deductionInput.referenceFeatureName || "Map reference",
           category,
           type,
@@ -1815,9 +1823,9 @@ class HideLineApp {
       if (force) await clearOfficialBoundaryCache();
       const data = await loadOfficialBoundaryData({ force });
       this.store.patch("referenceData", { ...data, status: data.errors?.length ? "partial" : "ready", updatedAt: data.importedAt, error: data.errors?.join(" ") || null }, { source: "reference-data", persist: false });
-      if (announce) this.toast(`${data.features.length} official borough, ward and constituency boundaries are ready.`, "success");
+      if (announce) this.toast(`${data.features.length} official ONS borough, ward and constituency polygons are ready.`, "success");
     } catch (error) {
-      this.store.patch("referenceData", { status: "error", updatedAt: null, sourceName: "Built-in official administrative boundaries", features: [], sources: [], errors: [error.message], error: error.message }, { source: "reference-data", persist: false });
+      this.store.patch("referenceData", { status: "error", updatedAt: null, sourceName: "Built-in official ONS administrative boundaries", features: [], sources: [], errors: [error.message], error: error.message }, { source: "reference-data", persist: false });
       if (announce) this.toast(error.message, "warning");
     }
   }
@@ -2092,6 +2100,91 @@ class HideLineApp {
     return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
   }
 
+  waterFeatures() {
+    return featuresForCategory(this.combinedSpatialData(this.store.get()).features, "water");
+  }
+
+  waterReferenceFromFeature(feature, seeker) {
+    return this.questionFeatureReference(feature, seeker, { category: "water", boundaryOnly: true });
+  }
+
+  updateWaterReferenceSummary(form) {
+    if (!form) return;
+    this.updateCoordinateSummary(form, "deductionWaterPoint");
+    const summary = form.querySelector("[data-water-reference-summary]");
+    if (!summary) return;
+    const seeker = this.coordinatePointFromForm(form, "deductionSeeker");
+    const point = this.coordinatePointFromForm(form, "deductionWaterPoint");
+    const name = String(form.querySelector('[name="deductionWaterName"]')?.value || "").trim();
+    const text = summary.querySelector("span");
+    const distanceNode = summary.querySelector("[data-water-reference-distance]");
+    if (text) {
+      text.textContent = point
+        ? `${name || "Selected shoreline"} · ${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`
+        : "No shoreline point selected yet";
+    }
+    if (distanceNode) {
+      if (seeker && point) {
+        distanceNode.textContent = `${Math.round(haversineMetres(seeker, point))} m from the seeker pin to this exact shoreline point.`;
+      } else if (!seeker) {
+        distanceNode.textContent = "Choose the seeker pin first, then select a water body or shoreline.";
+      } else {
+        distanceNode.textContent = "Select a mapped water body or pick the shoreline directly from the map.";
+      }
+    }
+    summary.classList.toggle("selected", Boolean(point));
+  }
+
+  refreshWaterReference(form) {
+    if (!form) return;
+    const seeker = this.coordinatePointFromForm(form, "deductionSeeker");
+    const selectedId = String(form.querySelector('[name="deductionReferenceFeatureId"]')?.value || "").trim();
+    if (seeker && selectedId) {
+      const feature = this.waterFeatures().find((item) => item.id === selectedId);
+      const reference = feature ? this.waterReferenceFromFeature(feature, seeker) : null;
+      if (reference?.referencePoint) {
+        this.fillCoordinateFields(form, "deductionWaterPoint", reference.referencePoint);
+        const nameInput = form.querySelector('[name="deductionWaterName"]');
+        if (nameInput) nameInput.value = feature.name;
+      }
+    }
+    this.updateWaterReferenceSummary(form);
+    this.captureModalDraft();
+  }
+
+  selectWaterReferenceFeature(select) {
+    const form = select?.closest("form");
+    if (!form) return;
+    const seeker = this.coordinatePointFromForm(form, "deductionSeeker");
+    if (!seeker) {
+      this.toast("Choose the seeker pin before selecting a body of water.", "warning");
+      select.value = "";
+      this.updateWaterReferenceSummary(form);
+      return;
+    }
+    const features = this.waterFeatures();
+    const requestedId = String(select.value || "").trim();
+    const feature = requestedId
+      ? features.find((item) => item.id === requestedId)
+      : nearestFeature(seeker, features, measurementOptionsForCategory("water", { boundaryOnly: true }))?.feature || null;
+    if (!feature) {
+      this.updateWaterReferenceSummary(form);
+      return;
+    }
+    const reference = this.waterReferenceFromFeature(feature, seeker);
+    if (!reference?.referencePoint) {
+      this.toast("HideLine could not find the nearest shoreline point for that water body.", "warning");
+      return;
+    }
+    select.value = feature.id;
+    const nameInput = form.querySelector('[name="deductionWaterName"]');
+    if (nameInput) nameInput.value = feature.name;
+    this.fillCoordinateFields(form, "deductionWaterPoint", reference.referencePoint);
+    this.updateWaterReferenceSummary(form);
+    this.captureModalDraft();
+    this.toast(`${feature.name} selected at its nearest shoreline point.`, "success");
+  }
+
   coordinatePickerForm() {
     const formName = this.coordinatePickerContext?.formName;
     if (formName) return this.root.querySelector(`form[data-form="${CSS.escape(formName)}"]`);
@@ -2103,14 +2196,40 @@ class HideLineApp {
     if (!form) throw new Error("Open the question first.");
     const prefix = String(button.dataset.prefix || "").trim();
     if (!prefix) throw new Error("This coordinate field could not be identified.");
-    const initialPoint = this.coordinatePointFromForm(form, prefix)
-      || this.store.get().location.current
-      || { lat: LONDON_MAP_CENTRE.lat, lng: LONDON_MAP_CENTRE.lng };
+    const mode = String(button.dataset.pickerMode || "point");
+    const seekerPrefix = String(button.dataset.seekerPrefix || "").trim();
+    const seeker = seekerPrefix ? this.coordinatePointFromForm(form, seekerPrefix) : null;
+    if (mode === "water-edge" && !seeker) throw new Error("Choose the seeker pin before selecting the nearest water edge.");
+
+    const existingPoint = this.coordinatePointFromForm(form, prefix);
+    const referenceFeatures = mode === "water-edge" ? this.waterFeatures() : [];
+    const selectedFeatureId = mode === "water-edge"
+      ? String(form.querySelector('[name="deductionReferenceFeatureId"]')?.value || "").trim()
+      : "";
+    const selectedFeature = selectedFeatureId ? referenceFeatures.find((feature) => feature.id === selectedFeatureId) : null;
+    const automaticFeature = mode === "water-edge" && seeker && !existingPoint && !selectedFeature
+      ? nearestFeature(seeker, referenceFeatures, measurementOptionsForCategory("water", { boundaryOnly: true }))?.feature || null
+      : null;
+    const effectiveFeature = selectedFeature || automaticFeature;
+    const selectedReference = effectiveFeature && seeker ? this.waterReferenceFromFeature(effectiveFeature, seeker) : null;
+    const waterName = mode === "water-edge" ? String(form.querySelector('[name="deductionWaterName"]')?.value || "").trim() : "";
+    const point = existingPoint || selectedReference?.referencePoint || null;
+    const mapInitialPoint = point || seeker || this.store.get().location.current || { lat: LONDON_MAP_CENTRE.lat, lng: LONDON_MAP_CENTRE.lng };
+
     this.coordinatePickerContext = {
       prefix,
       label: button.dataset.label || "Question location",
       formName: form.dataset.form || "",
-      point: initialPoint
+      mode,
+      seekerPrefix,
+      seeker,
+      point,
+      mapInitialPoint,
+      referenceFeatures,
+      selectedFeatureId: effectiveFeature?.id || null,
+      waterName: effectiveFeature?.name || waterName,
+      distanceMetres: selectedReference?.seekerDistanceMetres ?? (seeker && point ? haversineMetres(seeker, point) : null),
+      manualReference: Boolean(point && !effectiveFeature)
     };
     await this.renderCurrentCoordinatePicker();
   }
@@ -2120,26 +2239,47 @@ class HideLineApp {
     this.renderCurrentCoordinatePicker().catch((error) => console.warn("Coordinate picker could not be restored", error));
   }
 
+  coordinatePickerReadoutHtml(context) {
+    if (context.mode !== "water-edge") {
+      const point = context.point || context.mapInitialPoint;
+      return `<span>Selected point</span><strong id="coordinate-picker-readout">${Number(point.lat).toFixed(6)}, ${Number(point.lng).toFixed(6)}</strong>`;
+    }
+    const point = context.point;
+    const title = context.waterName || (point ? "Player-selected shoreline" : "Tap a body of water or shoreline");
+    const coords = point ? `${Number(point.lat).toFixed(6)}, ${Number(point.lng).toFixed(6)}` : "No shoreline selected yet";
+    const distance = Number.isFinite(Number(context.distanceMetres)) ? `${Math.round(Number(context.distanceMetres))} m from the seeker pin` : "Distance will be calculated automatically";
+    return `<span>Nearest water edge</span><strong id="coordinate-picker-readout">${escapeHtml(title)}</strong><small id="coordinate-picker-detail">${escapeHtml(coords)} · ${escapeHtml(distance)}</small>`;
+  }
+
+  updateCoordinatePickerReadout() {
+    const context = this.coordinatePickerContext;
+    if (!context) return;
+    const readout = document.querySelector(".coordinate-picker-readout");
+    if (readout) readout.innerHTML = this.coordinatePickerReadoutHtml(context);
+  }
+
   async renderCurrentCoordinatePicker() {
     const context = this.coordinatePickerContext;
     const dialog = document.getElementById("coordinate-picker-modal");
     if (!context || !dialog) return;
     const token = ++this.coordinatePickerRenderToken;
-    const point = context.point || { lat: LONDON_MAP_CENTRE.lat, lng: LONDON_MAP_CENTRE.lng };
+    const point = context.point || context.mapInitialPoint || { lat: LONDON_MAP_CENTRE.lat, lng: LONDON_MAP_CENTRE.lng };
+    const waterMode = context.mode === "water-edge";
+    const instructions = waterMode
+      ? "Tap a named blue water area or its bank. HideLine snaps to the closest edge from the seeker pin. When a water body is missing from the map data, tap the shoreline itself and enter its name."
+      : "Tap the map or drag the pin, then select <strong>Use this point</strong>.";
     dialog.innerHTML = `
       <div class="modal-frame coordinate-picker-frame">
         <header class="modal-header">
-          <div><p class="eyebrow">Choose on map</p><h2>${escapeHtml(context.label)}</h2><p>Tap the map or drag the pin, then select <strong>Use this point</strong>.</p></div>
+          <div><p class="eyebrow">${waterMode ? "Choose water edge" : "Choose on map"}</p><h2>${escapeHtml(context.label)}</h2><p>${instructions}</p></div>
           <button class="icon-button" type="button" data-action="coordinate-picker-cancel" aria-label="Close coordinate map">×</button>
         </header>
         <div class="modal-body coordinate-picker-body">
+          ${waterMode && !context.referenceFeatures.length ? `<div class="callout warning">${icon("info")}<p>No mapped named-water polygons are loaded. Tap the exact shoreline point manually; HideLine will calculate and record the seeker distance.</p></div>` : ""}
           <div id="coordinate-picker-map" class="coordinate-picker-map" role="application" aria-label="Map for choosing question coordinates"></div>
-          <div class="coordinate-picker-readout" aria-live="polite">
-            <span>Selected point</span>
-            <strong id="coordinate-picker-readout">${Number(point.lat).toFixed(6)}, ${Number(point.lng).toFixed(6)}</strong>
-          </div>
+          <div class="coordinate-picker-readout" aria-live="polite">${this.coordinatePickerReadoutHtml(context)}</div>
           <div class="coordinate-picker-actions">
-            <button class="button button-soft" type="button" data-action="coordinate-picker-use-gps">Use my GPS</button>
+            ${waterMode ? "" : '<button class="button button-soft" type="button" data-action="coordinate-picker-use-gps">Use my GPS</button>'}
             <button class="button button-soft" type="button" data-action="coordinate-picker-cancel">Cancel</button>
             <button class="button button-primary" type="button" data-action="coordinate-picker-confirm">Use this point</button>
           </div>
@@ -2151,19 +2291,52 @@ class HideLineApp {
     }
     await renderCoordinatePickerMap({
       initialPoint: point,
+      referenceFeatures: waterMode ? context.referenceFeatures : [],
+      referenceLabel: waterMode ? "Named bodies of water" : "",
       onChange: (selected) => this.setCoordinatePickerPoint(selected)
     });
     if (token !== this.coordinatePickerRenderToken || !this.coordinatePickerContext) destroyCoordinatePickerMap();
   }
 
   setCoordinatePickerPoint(point) {
-    if (!this.coordinatePickerContext) return;
+    const context = this.coordinatePickerContext;
+    if (!context) return;
     const lat = Number(point?.lat);
     const lng = Number(point?.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    this.coordinatePickerContext.point = { lat, lng };
-    const readout = document.getElementById("coordinate-picker-readout");
-    if (readout) readout.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    const selected = { lat, lng };
+
+    if (context.mode === "water-edge") {
+      const features = context.referenceFeatures || [];
+      const options = measurementOptionsForCategory("water", { boundaryOnly: true });
+      let feature = containingFeature(selected, features);
+      if (!feature) {
+        const nearest = nearestFeature(selected, features, options);
+        if (nearest && nearest.distanceMetres <= 350) feature = nearest.feature;
+      }
+      if (feature && context.seeker) {
+        const reference = this.waterReferenceFromFeature(feature, context.seeker);
+        if (reference?.referencePoint) {
+          context.point = reference.referencePoint;
+          context.selectedFeatureId = feature.id;
+          context.waterName = feature.name;
+          context.distanceMetres = reference.seekerDistanceMetres;
+          context.manualReference = false;
+          updateCoordinatePickerPoint(context.point, { pan: false });
+          this.updateCoordinatePickerReadout();
+          return;
+        }
+      }
+      context.point = selected;
+      context.selectedFeatureId = null;
+      context.distanceMetres = context.seeker ? haversineMetres(context.seeker, selected) : null;
+      context.manualReference = true;
+      this.updateCoordinatePickerReadout();
+      return;
+    }
+
+    context.point = selected;
+    this.updateCoordinatePickerReadout();
   }
 
   async useCoordinatePickerGps() {
@@ -2175,10 +2348,27 @@ class HideLineApp {
 
   confirmCoordinatePicker() {
     const context = this.coordinatePickerContext;
-    if (!context?.point) throw new Error("Choose a point on the map first.");
+    if (!context?.point) throw new Error(context?.mode === "water-edge" ? "Choose the shoreline point on the map first." : "Choose a point on the map first.");
     const form = this.coordinatePickerForm();
     if (!form) throw new Error("The question form is no longer open.");
     this.fillCoordinateFields(form, context.prefix, context.point);
+
+    if (context.mode === "water-edge") {
+      const select = form.querySelector('[name="deductionReferenceFeatureId"]');
+      if (select) select.value = context.selectedFeatureId || "";
+      const nameInput = form.querySelector('[name="deductionWaterName"]');
+      if (nameInput) {
+        const fallbackName = String(nameInput.value || "").trim();
+        nameInput.value = context.waterName || fallbackName;
+        nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      this.updateWaterReferenceSummary(form);
+      this.captureModalDraft();
+      this.closeCoordinatePicker();
+      this.toast("Nearest water-edge point and distance added.", "success");
+      return;
+    }
+
     const pinInput = form.querySelector('[name="pinLabel"]');
     if (pinInput && !String(pinInput.value || "").trim()) {
       const lat = Number(context.point.lat).toFixed(6);
@@ -2378,6 +2568,52 @@ class HideLineApp {
     }
     if (config.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE) {
       const boundaryOnly = Boolean(config.boundaryOnly) || ["water", "borough"].includes(config.category);
+      if (config.category === "water") {
+        const selectedId = String(data.deductionReferenceFeatureId || "").trim();
+        const selectedFeature = selectedId ? categoryFeatures.find((feature) => feature.id === selectedId) : null;
+        const selectedPoint = this.optionalDeductionPoint(data, "deductionWaterPoint", "the nearest water edge");
+        const selectedName = String(data.deductionWaterName || "").trim();
+        let reference = selectedFeature
+          ? this.waterReferenceFromFeature(selectedFeature, seeker)
+          : null;
+        if (!reference && !selectedPoint && categoryFeatures.length) {
+          reference = this.resolveQuestionReference(categoryFeatures, seeker, data, { category: "water", boundaryOnly: true });
+        }
+        if (reference && selectedPoint) {
+          reference = {
+            ...reference,
+            referencePoint: selectedPoint,
+            seekerDistanceMetres: haversineMetres(seeker, selectedPoint)
+          };
+        }
+        if (!reference && selectedPoint) {
+          if (!selectedName) throw new Error("Enter the name of the body of water selected on the map.");
+          reference = {
+            referenceFeatureId: null,
+            referenceFeatureName: selectedName,
+            referenceCategory: "water",
+            referencePoint: selectedPoint,
+            referenceGeometry: null,
+            referenceSource: "Player-selected shoreline",
+            seekerDistanceMetres: haversineMetres(seeker, selectedPoint),
+            measurementMethod: "player-confirmed nearest shoreline point",
+            manualReference: true
+          };
+        }
+        if (!reference) throw new Error("Choose a mapped body of water or use Pick nearest water edge from map before asking this question.");
+        const manualReference = Boolean(reference.manualReference || !reference.referenceFeatureId);
+        return {
+          enabled: true,
+          type: config.type,
+          movementMode,
+          seeker,
+          category: "water",
+          boundaryOnly: true,
+          ...reference,
+          manualReference,
+          referenceSummary: `${reference.referenceFeatureName} · ${reference.measurementMethod} · ${Math.round(reference.seekerDistanceMetres || 0)} m from the seeker pin`
+        };
+      }
       const reference = categoryFeatures.length
         ? this.resolveQuestionReference(categoryFeatures, seeker, data, { category: config.category, boundaryOnly })
         : null;

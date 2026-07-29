@@ -1977,3 +1977,97 @@ select[multiple] option { padding: 7px 8px; border-radius: 7px; }
   .zone-question-guide-actions .button { width: 100%; }
 }
 .map-data-question-warning > div { display: grid; gap: .65rem; justify-items: start; }
+
+/* HideLine 2.3.1: guided body-of-water reference picker */
+.water-reference-picker {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 2px solid rgba(22,110,167,.22);
+  border-radius: 18px;
+  background: linear-gradient(145deg,rgba(84,183,232,.10),rgba(255,255,255,.97));
+}
+.water-reference-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+.water-reference-icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  color: white;
+  background: #166ea7;
+}
+.water-reference-icon svg { width: 21px; height: 21px; }
+.water-reference-heading > div { min-width: 0; display: grid; gap: 3px; }
+.water-reference-heading strong { font-size: .92rem; }
+.water-reference-heading p { margin: 0; color: var(--ink-600); font-size: .75rem; line-height: 1.48; }
+.water-reference-actions { display: flex; justify-content: flex-start; }
+.water-reference-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0,1fr) auto;
+  align-items: center;
+  row-gap: 4px;
+}
+.water-reference-summary > span { min-width: 0; overflow-wrap: anywhere; }
+.water-reference-summary small {
+  grid-column: 2 / -1;
+  color: var(--ink-600);
+  font: 700 .69rem/1.4 var(--font-sans, system-ui, sans-serif);
+}
+.water-rule-note { border-color: rgba(22,110,167,.20); background: rgba(84,183,232,.07); }
+.coordinate-picker-readout small {
+  display: block;
+  max-width: min(58vw, 560px);
+  color: var(--ink-600);
+  font-size: .69rem;
+  font-weight: 750;
+  line-height: 1.4;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 680px) {
+  .water-reference-actions .button { width: 100%; }
+  .water-reference-summary { grid-template-columns: auto minmax(0,1fr); }
+  .water-reference-summary .coordinate-preview-link { grid-column: 2; justify-self: start; }
+  .water-reference-summary small { grid-column: 2; }
+  .coordinate-picker-readout small { max-width: 100%; text-align: left; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .water-reference-picker { border-color: rgba(103,199,242,.32); background: linear-gradient(145deg,rgba(22,110,167,.24),#10283b); }
+  .water-reference-heading p,
+  .water-reference-summary small,
+  .coordinate-picker-readout small { color: #a9bdc9; }
+  .water-rule-note { border-color: rgba(103,199,242,.28); background: rgba(22,110,167,.18); }
+}
+
+.boundary-source-list {
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 8px;
+}
+.boundary-source-status {
+  display: grid;
+  gap: 2px;
+  padding: 10px 11px;
+  border: 1px solid var(--ink-200);
+  border-radius: 12px;
+  background: var(--ink-50);
+}
+.boundary-source-status strong { font-size: .76rem; }
+.boundary-source-status small { color: var(--ink-600); font-size: .66rem; line-height: 1.35; }
+.boundary-source-status.status-ready { border-color: rgba(0,153,132,.28); background: rgba(0,199,178,.08); }
+.boundary-source-status.status-error { border-color: rgba(181,35,58,.30); background: rgba(218,24,62,.07); }
+@media (max-width: 760px) { .boundary-source-list { grid-template-columns: 1fr; } }
+@media (prefers-color-scheme: dark) {
+  .boundary-source-status { border-color: #27465c; background: #10283b; }
+  .boundary-source-status small { color: #98aebb; }
+  .boundary-source-status.status-ready { border-color: rgba(0,199,178,.34); background: rgba(0,199,178,.12); }
+  .boundary-source-status.status-error { border-color: rgba(255,118,140,.38); background: rgba(181,35,58,.18); }
+}

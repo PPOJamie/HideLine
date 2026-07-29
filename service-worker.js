@@ -1,5 +1,5 @@
-const CACHE_VERSION = "hideline-shell-v2.3.0";
-const RUNTIME_CACHE = "hideline-runtime-v2.3.0";
+const CACHE_VERSION = "hideline-shell-v2.3.1";
+const RUNTIME_CACHE = "hideline-runtime-v2.3.1";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -11,8 +11,8 @@ const APP_SHELL = [
   "./assets/icon-512.png",
   "./assets/icon-maskable-512.png",
   "./assets/apple-touch-icon.png",
-  "./src/styles.css?v=2.3.0",
-  "./src/app.js?v=2.3.0",
+  "./src/styles.css?v=2.3.1",
+  "./src/app.js?v=2.3.1",
   "./src/core/constants.js",
   "./src/core/format.js",
   "./src/core/time.js",

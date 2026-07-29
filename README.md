@@ -1,10 +1,19 @@
 # HideLine — London Hide + Seek Companion
 
-HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.3.0 incorporates the first full game-day playtest: exact custom timers, question forms that retain unsaved coordinates, direct answer viewing, clearer measuring references, built-in official administrative boundaries and easier POI/Tentacle selection.
+HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.3.1 adds a direct body-of-water shoreline picker and replaces the failing administrative-boundary requests with fixed official ONS FeatureServer layers, validated response handling and a cached ArcGIS JSON fallback.
 
 ![Simple HideLine game screen](assets/screenshot-simple-desktop.png)
 
 ![Simple HideLine deduction map on mobile](assets/screenshot-simple-mobile.png)
+
+## What is new in 2.3.1
+
+- **Pick a water edge from the map:** Body of Water Measuring now opens a dedicated map. Choose the seeker pin, then tap a named water polygon or the correct shoreline. HideLine records the exact point and automatically calculates the seeker-to-edge distance.
+- **Incomplete water lists no longer block play:** the existing mapped-water dropdown remains available, but a missing canal, dock, lake or basin can be named and selected manually from the basemap. The exact reference is shown on the question and hider map.
+- **Safer deductions from manual water points:** a manually selected shoreline is retained as a visible, auditable clue. HideLine does not pretend that an incomplete water dataset can safely eliminate the rest of London automatically.
+- **Boundary requests repaired:** boroughs, wards and constituencies use fixed ONS `FeatureServer/0/query` layers and simple spatial queries rather than the retired HTML/MapServer routes that produced the reported errors.
+- **Two-format boundary fallback:** each layer first requests GeoJSON and automatically retries as ArcGIS JSON when a service or browser rejects GeoJSON. Valid Central London polygons are cached after the first successful load.
+- **Per-layer status:** the Map Data panel shows separate Ready/Unavailable states for London boroughs, electoral wards and parliamentary constituencies, with one control to clear an invalid cache and retry.
 
 ## What is new in 2.3.0
 
@@ -13,7 +22,7 @@ HideLine is an installable, mobile-first companion for the two-round London tran
 - **Answers are one tap away:** **View answer** opens a complete answer card from the notification, Questions history, latest-answer card or Recent Activity.
 - **Accurate boundary handling:** the exact red Game Area boundary is drawn only from the supplied Google My Map. HideLine attempts to load it automatically; when Google blocks the KML download, the app shows a clearly labelled amber fallback until the KML/KMZ is imported.
 - **Transparent measuring calculations:** the active question and hider map name the exact feature used, show the seeker pin, the exact edge/pin/line point, the measured distance and the method. With hider GPS available, the map also highlights the hider's own nearest valid reference in teal.
-- **Built-in administrative layers:** London boroughs, electoral wards and Westminster constituencies load from built-in official GLA/ONS source definitions and are cached for later game-day use. They no longer depend on the Google My Map import.
+- **Built-in administrative layers:** London boroughs, electoral wards and Westminster constituencies load from built-in official ONS FeatureServer source definitions and are cached for later game-day use. They no longer depend on the Google My Map import.
 - **Tentacle answer lists:** the hider receives a drop-down containing only the valid mapped POIs within two kilometres of the seeker pin.
 - **POI matching and measuring lists:** when asking park, zoo, museum, cinema, hospital, library, consulate and similar questions, seekers can confirm the exact mapped feature or leave the app to choose the nearest one automatically.
 
@@ -112,7 +121,7 @@ window.HIDELINE_CONFIG = {
 };
 ```
 
-HideLine 2.3.0 requires **no new Supabase migration**. Timer, form-draft, answer-view, boundary, measuring, boundary-source and POI-list changes are client-side. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
+HideLine 2.3.1 requires **no new Supabase migration**. Water-reference and administrative-boundary fixes are client-side, as were the 2.3.0 timer, form-draft, answer-view and POI changes. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
 
 ## Privacy model
 

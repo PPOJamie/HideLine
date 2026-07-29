@@ -17,8 +17,7 @@ The configured map ID points to a user-provided Google My Maps layer. The map, b
 - The built-in Thames planning guide is a hand-curated game aid aligned to major crossings and the OpenStreetMap basemap. It is not a surveyed bank boundary and carries OpenStreetMap attribution in the source and interface.
 - Nominatim is used only as a fallback station geocoder and is subject to its usage policy.
 - National Rail and linked service-status pages are external services with their own terms.
-- London borough polygons are requested from the Greater London Authority London Borough feature layer. The layer describes itself as Open Government Licence v3.0 data and includes Ordnance Survey Open Data attribution.
-- Electoral ward and Westminster parliamentary constituency polygons are requested from Office for National Statistics ArcGIS feature layers. They remain subject to the source data notices and the Open Government Licence where applicable. HideLine caches only the Central London features needed for game play.
+- London borough, electoral ward and Westminster parliamentary constituency polygons are requested from fixed Office for National Statistics ArcGIS FeatureServer layers. The datasets contain ONS and Ordnance Survey intellectual property and remain subject to the source notices and the Open Government Licence where applicable. HideLine caches only the Central London features needed for game play.
 
 ## Runtime libraries and CDNs
 
