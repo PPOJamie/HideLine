@@ -5,9 +5,17 @@ import {
   constraintOverlay,
   DEDUCTION_MAP_MODES,
   DEDUCTION_STATUS,
+  DEDUCTION_TOOL_TYPES,
   evaluateZoneAreaMask,
   THAMES_CENTRELINE
 } from "../core/deduction.js";
+import {
+  containingFeature,
+  featureNearestPoint,
+  featuresForCategory,
+  measurementOptionsForCategory,
+  nearestFeature
+} from "../core/spatial.js";
 
 let loadPromise;
 let zoneMapInstance;
@@ -126,38 +134,137 @@ export function renderMapFallback(containerId, message) {
     </div>`;
 }
 
-function addBaseMap(L, map, { showBoundary = true } = {}) {
+function gameBoundaryFeatures(spatialFeatures = []) {
+  return (spatialFeatures || []).filter((feature) => feature?.category === "game_boundary" && feature.geometry);
+}
+
+function addBaseMap(L, map, { showBoundary = true, spatialFeatures = [] } = {}) {
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
   if (!showBoundary) return;
+  const exact = gameBoundaryFeatures(spatialFeatures);
+  if (exact.length) {
+    const collection = { type: "FeatureCollection", features: exact.map((feature) => ({ type: "Feature", geometry: feature.geometry, properties: { name: feature.name } })) };
+    L.geoJSON(collection, {
+      style: { color: "#d51f3d", weight: 4, opacity: 0.98, fillColor: "#d51f3d", fillOpacity: 0.025 },
+      interactive: false
+    }).bindTooltip("Official Game Area Map Boundary imported from the supplied game map").addTo(map);
+    return;
+  }
   L.polygon(APPROXIMATE_GAME_BOUNDARY.map(([lng, lat]) => [lat, lng]), {
-    color: "#e9572e",
+    color: "#b7791f",
     weight: 2,
-    opacity: 0.9,
-    fillColor: "#f26a3d",
-    fillOpacity: 0.035,
-    dashArray: "8 7",
+    opacity: 0.82,
+    fillColor: "#f6c453",
+    fillOpacity: 0.02,
+    dashArray: "10 8",
     interactive: false
-  }).bindTooltip("Approximate planning boundary - check the authoritative Google layer").addTo(map);
+  }).bindTooltip("Fallback station-coverage guide — import the game map for the official red boundary").addTo(map);
 }
 
-export async function renderZoneMap({ containerId = "zone-map", station, positions = [], radiusMetres = 500, onReady } = {}) {
+function drawQuestionReference(L, group, question, spatialFeatures = []) {
+  if (!question) return;
+  const input = question.deductionInput || {};
+  const seeker = input.seeker || input.centre || input.end || input.sharedPin || null;
+  const reference = question.mapReference || null;
+  const feature = input.referenceFeatureId ? spatialFeatures.find((item) => item.id === input.referenceFeatureId) : null;
+  const geometry = feature?.geometry || reference?.geometry || input.referenceGeometry || null;
+  const referencePoint = input.referencePoint || reference?.point || null;
+  if (geometry) {
+    try {
+      L.geoJSON({ type: "Feature", geometry, properties: {} }, {
+        style: { color: "#ef7d00", weight: 4, opacity: 0.9, fillColor: "#ffb454", fillOpacity: 0.12 },
+        pointToLayer: (_feature, latlng) => L.circleMarker(latlng, { radius: 7, color: "#7c3d00", fillColor: "#ff9f1c", fillOpacity: 0.95, weight: 3 })
+      }).bindTooltip(reference?.name || input.referenceFeatureName || "Question reference").addTo(group);
+    } catch { /* malformed shared geometry should not break the zone map */ }
+  }
+  if (seeker?.lat != null && seeker?.lng != null) {
+    L.circleMarker([Number(seeker.lat), Number(seeker.lng)], { radius: 7, color: "#123b72", fillColor: "#3b82f6", fillOpacity: 0.98, weight: 3 })
+      .bindTooltip("Seeker question pin")
+      .addTo(group);
+  }
+  if (referencePoint?.lat != null && referencePoint?.lng != null) {
+    const point = [Number(referencePoint.lat), Number(referencePoint.lng)];
+    L.circleMarker(point, { radius: 8, color: "#713500", fillColor: "#ff9f1c", fillOpacity: 1, weight: 3 })
+      .bindTooltip(reference?.name || input.referenceFeatureName || "Measurement reference")
+      .addTo(group);
+    if (seeker?.lat != null && seeker?.lng != null) {
+      L.polyline([[Number(seeker.lat), Number(seeker.lng)], point], { color: "#ef7d00", weight: 3, dashArray: "8 6", opacity: 0.9 }).addTo(group);
+    }
+  }
+  for (const choice of (question.answerChoices || []).slice(0, 80)) {
+    if (choice?.point?.lat == null || choice?.point?.lng == null) continue;
+    L.circleMarker([Number(choice.point.lat), Number(choice.point.lng)], { radius: 5, color: "#61430b", fillColor: "#ffd166", fillOpacity: 0.9, weight: 2 })
+      .bindTooltip(choice.name || "Tentacle option")
+      .addTo(group);
+  }
+}
+
+function drawHiderAnswerHelper(L, group, question, spatialFeatures = [], positions = []) {
+  const input = question?.deductionInput || {};
+  const own = positions.find((position) => position?.isOwn && Number.isFinite(Number(position.lat)) && Number.isFinite(Number(position.lng)));
+  if (!own || !input.category) return;
+  const features = featuresForCategory(spatialFeatures, input.category);
+  if (!features.length) return;
+  const point = { lat: Number(own.lat), lng: Number(own.lng) };
+  let candidate = null;
+  let nearestPoint = null;
+  let distanceMetres = null;
+
+  if (input.type === DEDUCTION_TOOL_TYPES.REGION_MATCH) {
+    candidate = containingFeature(point, features);
+    nearestPoint = point;
+    distanceMetres = 0;
+  } else {
+    const options = measurementOptionsForCategory(input.category, { boundaryOnly: Boolean(input.boundaryOnly) });
+    let candidates = features;
+    if (input.type === DEDUCTION_TOOL_TYPES.TENTACLE && Array.isArray(question.answerChoices) && question.answerChoices.length) {
+      const allowedIds = new Set(question.answerChoices.map((choice) => choice.id));
+      candidates = features.filter((feature) => allowedIds.has(feature.id));
+    }
+    const nearest = nearestFeature(point, candidates, options);
+    candidate = nearest?.feature || null;
+    distanceMetres = nearest?.distanceMetres ?? null;
+    nearestPoint = candidate ? featureNearestPoint(point, candidate, options)?.point || null : null;
+  }
+  if (!candidate) return;
+
+  try {
+    L.geoJSON({ type: "Feature", geometry: candidate.geometry, properties: {} }, {
+      style: { color: "#006b73", weight: 4, opacity: 0.95, fillColor: "#2dd4bf", fillOpacity: 0.13 },
+      pointToLayer: (_feature, latlng) => L.circleMarker(latlng, { radius: 7, color: "#004e54", fillColor: "#2dd4bf", fillOpacity: 1, weight: 3 })
+    }).bindTooltip(`Your current nearest reference: ${escapeMapText(candidate.name)}`).addTo(group);
+  } catch { /* keep the map usable if a shared feature is malformed */ }
+
+  if (nearestPoint?.lat != null && nearestPoint?.lng != null) {
+    const target = [Number(nearestPoint.lat), Number(nearestPoint.lng)];
+    const detail = Number.isFinite(Number(distanceMetres)) ? ` — ${Math.round(Number(distanceMetres))} m` : "";
+    L.circleMarker(target, { radius: 8, color: "#004e54", fillColor: "#2dd4bf", fillOpacity: 1, weight: 3 })
+      .bindTooltip(`Your reference point: ${escapeMapText(candidate.name)}${detail}`)
+      .addTo(group);
+    if (Number(distanceMetres) > 0) {
+      L.polyline([[point.lat, point.lng], target], { color: "#006b73", weight: 3, dashArray: "7 6", opacity: 0.95 }).addTo(group);
+    }
+  }
+}
+
+export async function renderZoneMap({ containerId = "zone-map", station, positions = [], radiusMetres = 500, question = null, spatialFeatures = [], onReady } = {}) {
   const L = await loadLeaflet();
   const container = document.getElementById(containerId);
   if (!container) return null;
   destroyZoneMap();
   zoneMapInstance = L.map(container, { zoomControl: true, attributionControl: true }).setView([LONDON_MAP_CENTRE.lat, LONDON_MAP_CENTRE.lng], LONDON_MAP_CENTRE.zoom);
-  addBaseMap(L, zoneMapInstance);
+  addBaseMap(L, zoneMapInstance, { spatialFeatures });
   zoneLayerGroup = L.layerGroup().addTo(zoneMapInstance);
-  updateZoneMap({ station, positions, radiusMetres });
+  updateZoneMap({ station, positions, radiusMetres, question, spatialFeatures });
   setTimeout(() => zoneMapInstance?.invalidateSize(), 60);
   onReady?.(zoneMapInstance);
   return zoneMapInstance;
 }
 
-export function updateZoneMap({ station, positions = [], radiusMetres = 500 } = {}) {
+export function updateZoneMap({ station, positions = [], radiusMetres = 500, question = null, spatialFeatures = [] } = {}) {
   if (!zoneMapInstance || !zoneLayerGroup || !window.L) return;
   const L = window.L;
   zoneLayerGroup.clearLayers();
@@ -180,6 +287,8 @@ export function updateZoneMap({ station, positions = [], radiusMetres = 500 } = 
     if (position.accuracy) L.circle(point, { radius: Number(position.accuracy), color: "#3269bb", weight: 1, fillOpacity: 0.03 }).addTo(zoneLayerGroup);
     bounds.push(point);
   }
+  drawQuestionReference(L, zoneLayerGroup, question, spatialFeatures);
+  drawHiderAnswerHelper(L, zoneLayerGroup, question, spatialFeatures, positions);
   if (bounds.length === 1) zoneMapInstance.setView(bounds[0], 15);
   if (bounds.length > 1) zoneMapInstance.fitBounds(bounds, { padding: [45, 45], maxZoom: 16 });
 }
@@ -388,9 +497,23 @@ function drawConstraintOverlays(L, group, constraints, spatialFeatures = [], dis
         .addTo(group);
     }
     if (overlay.type === "reference") {
+      const referencePoint = overlay.referencePoint;
+      const distance = Number(overlay.seekerDistanceMetres);
+      const method = overlay.measurementMethod || "mapped reference";
+      const distanceText = Number.isFinite(distance) ? ` · ${Math.round(distance)} m from the seeker pin` : "";
       if (overlay.seeker) {
         L.circleMarker([overlay.seeker.lat, overlay.seeker.lng], { radius: contextOnly ? 4 : 7, color, opacity, fillColor: "#fff", fillOpacity: contextOnly ? 0.7 : 1, weight, interactive: false })
           .bindTooltip(contextOnly ? "Earlier seeker reference pin" : "Seeker reference pin")
+          .addTo(group);
+      }
+      if (referencePoint && overlay.seeker) {
+        L.polyline([[overlay.seeker.lat, overlay.seeker.lng], [referencePoint.lat, referencePoint.lng]], { color: "#ef7d00", weight: contextOnly ? 1.5 : 3.5, opacity, dashArray: contextOnly ? "4 7" : "8 6", interactive: false })
+          .bindTooltip(escapeMapText(`${method}${distanceText}`))
+          .addTo(group);
+      }
+      if (referencePoint) {
+        L.circleMarker([referencePoint.lat, referencePoint.lng], { radius: contextOnly ? 5 : 8, color: "#713500", opacity, fillColor: "#ff9f1c", fillOpacity: contextOnly ? 0.7 : 1, weight: contextOnly ? 2 : 3, interactive: false })
+          .bindTooltip(escapeMapText(`${overlay.referenceFeature?.name || overlay.label || "Measurement reference"} · ${method}${distanceText}`))
           .addTo(group);
       }
       if (constraint.type === "tentacle" && overlay.seeker) {
@@ -744,8 +867,12 @@ function vectorConstraintSvg(constraints, spatialFeatures = [], projection = VEC
     if (overlay.type === "polygon" && Array.isArray(overlay.points)) return wrap(`<polygon points="${vectorPoints(overlay.points, projection)}" fill="${colour}" fill-opacity=".08" stroke="${colour}" stroke-width="${historical ? 2 : 3}" stroke-dasharray="${historical ? "4 8" : "7 5"}"><title>${escapeMapText(historical ? `Earlier clue: ${overlay.label}` : overlay.label)}</title></polygon>`);
     if (overlay.type === "reference") {
       const seeker = overlay.seeker ? vectorPoint(overlay.seeker, projection) : null;
+      const referencePoint = overlay.referencePoint ? vectorPoint(overlay.referencePoint, projection) : null;
+      const distance = Number(overlay.seekerDistanceMetres);
+      const distanceText = Number.isFinite(distance) ? ` · ${Math.round(distance)} m` : "";
+      const referenceTitle = escapeMapText(`${overlay.referenceFeature?.name || overlay.label || "Measurement reference"} · ${overlay.measurementMethod || "mapped reference"}${distanceText}`);
       const tentacleRadius = constraint.type === "tentacle" && overlay.seeker ? vectorEllipse(overlay.seeker, Number(constraint.radiusMetres) || 2000, projection) : null;
-      return wrap(`${tentacleRadius ? `<ellipse cx="${seeker.x}" cy="${seeker.y}" rx="${tentacleRadius.rx}" ry="${tentacleRadius.ry}" fill="${colour}" fill-opacity=".02" stroke="${colour}" stroke-width="${historical ? 1.5 : 2}" stroke-dasharray="${historical ? "4 8" : "8 7"}" />` : ""}${seeker ? `<circle cx="${seeker.x}" cy="${seeker.y}" r="${historical ? 5 : 7}" fill="#fff" stroke="${colour}" stroke-width="3" />` : ""}${vectorFeatureSvg(overlay.referenceFeature, colour, projection)}`);
+      return wrap(`${tentacleRadius ? `<ellipse cx="${seeker.x}" cy="${seeker.y}" rx="${tentacleRadius.rx}" ry="${tentacleRadius.ry}" fill="${colour}" fill-opacity=".02" stroke="${colour}" stroke-width="${historical ? 1.5 : 2}" stroke-dasharray="${historical ? "4 8" : "8 7"}" />` : ""}${seeker ? `<circle cx="${seeker.x}" cy="${seeker.y}" r="${historical ? 5 : 7}" fill="#fff" stroke="${colour}" stroke-width="3" />` : ""}${seeker && referencePoint ? `<line x1="${seeker.x}" y1="${seeker.y}" x2="${referencePoint.x}" y2="${referencePoint.y}" stroke="#ef7d00" stroke-width="${historical ? 1.5 : 3.5}" stroke-dasharray="${historical ? "4 8" : "8 6"}"><title>${referenceTitle}</title></line>` : ""}${referencePoint ? `<circle cx="${referencePoint.x}" cy="${referencePoint.y}" r="${historical ? 5 : 8}" fill="#ff9f1c" stroke="#713500" stroke-width="3"><title>${referenceTitle}</title></circle>` : ""}${vectorFeatureSvg(overlay.referenceFeature, colour, projection)}`);
     }
     return "";
   }).join("");
@@ -810,6 +937,7 @@ function renderDeductionVectorMap({
   const selectedStation = results.find((result) => result.id === selectedStationId)
     || (displayMode === DEDUCTION_MAP_MODES.ENDGAME ? endgameStation : null);
   const projection = vectorProjectionForMode({ displayMode, maskScope, selectedStation, endgameStation });
+  const exactBoundarySvg = gameBoundaryFeatures(spatialFeatures).map((feature) => vectorFeatureSvg(feature, "#d51f3d", projection)).join("");
   const plans = buildAreaMaskPlans({ displayMode, results, constraints, activeConstraint, answerConstraints, answerSelectionAll, endgameStation, showEliminated, showAreaMask, maskScope, selectedStationId, spatialFeatures });
   const maskSvg = vectorAreaMaskSvg(plans, projection);
   const zoneSvg = visible.map((result) => {
@@ -844,7 +972,7 @@ function renderDeductionVectorMap({
         </defs>
         <rect width="${VECTOR_MAP.width}" height="${VECTOR_MAP.height}" rx="22" fill="#edf4f7" />
         <rect x="18" y="18" width="${VECTOR_MAP.width - 36}" height="${VECTOR_MAP.height - 36}" rx="18" fill="url(#vector-grid)" />
-        ${showPlanningContext ? `<polygon points="${vectorPoints(boundary, projection)}" fill="#f26a3d" fill-opacity=".035" stroke="#e9572e" stroke-width="2.5" stroke-dasharray="10 8"><title>Approximate planning boundary</title></polygon>` : ""}
+        ${showPlanningContext ? (exactBoundarySvg || `<polygon points="${vectorPoints(boundary, projection)}" fill="#f6c453" fill-opacity=".025" stroke="#b7791f" stroke-width="2.5" stroke-dasharray="10 8"><title>Fallback station-coverage guide</title></polygon>`) : ""}
         ${showPlanningContext ? `<polyline points="${thames}" fill="none" stroke="#8bc7e3" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".38"><title>River Thames planning guide</title></polyline><polyline points="${thames}" fill="none" stroke="#2176ae" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity=".78" />` : ""}
         ${zoneSvg}
         ${vectorConstraintSvg(modeConstraints, spatialFeatures, projection, displayMode)}
@@ -909,7 +1037,7 @@ export async function renderDeductionMap({
 
   const endgameMode = displayMode === DEDUCTION_MAP_MODES.ENDGAME;
   deductionMapInstance = L.map(container, { zoomControl: true, attributionControl: true, preferCanvas: true }).setView([LONDON_MAP_CENTRE.lat, LONDON_MAP_CENTRE.lng], LONDON_MAP_CENTRE.zoom);
-  addBaseMap(L, deductionMapInstance, { showBoundary: !endgameMode });
+  addBaseMap(L, deductionMapInstance, { showBoundary: !endgameMode, spatialFeatures });
   deductionLayerGroups = {
     overlays: L.layerGroup().addTo(deductionMapInstance),
     zones: L.layerGroup().addTo(deductionMapInstance),

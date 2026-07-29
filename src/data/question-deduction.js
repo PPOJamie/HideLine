@@ -31,7 +31,7 @@ export const QUESTION_DEDUCTION = Object.freeze({
   "measuring-station": automatic("nearest-station-distance", { requiresSeekerPoint: true }),
   "measuring-borough": automatic("nearest-feature-distance", { category: "borough", requiresSeekerPoint: true, boundaryOnly: true, dataLabel: "London borough polygons" }),
   "measuring-altitude": guided("Altitude and indoor-floor answers are not a reliable two-dimensional map boundary. Link the answer, then draw only the area you can fairly infer."),
-  "measuring-water": automatic("nearest-feature-distance", { category: "water", requiresSeekerPoint: true, dataLabel: "named bodies of water" }),
+  "measuring-water": automatic("nearest-feature-distance", { category: "water", requiresSeekerPoint: true, boundaryOnly: true, dataLabel: "named bodies of water" }),
   "measuring-park": automatic("nearest-feature-distance", { category: "park", requiresSeekerPoint: true, dataLabel: "park POIs" }),
   "measuring-zoo": automatic("nearest-feature-distance", { category: "zoo", requiresSeekerPoint: true, dataLabel: "zoo POIs" }),
   "measuring-aquarium": automatic("nearest-feature-distance", { category: "aquarium", requiresSeekerPoint: true, dataLabel: "aquarium POI" }),

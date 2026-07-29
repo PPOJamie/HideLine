@@ -3,7 +3,9 @@ import { haversineMetres } from "./geo.js";
 import {
   containingFeature,
   featureDistanceMetres,
+  featureNearestPoint,
   featuresForCategory,
+  measurementOptionsForCategory,
   nearestFeature,
   pointInManualArea,
   resolveFeatureAnswer,
@@ -309,7 +311,7 @@ function prepareConstraint(constraint, context = {}) {
     if (!seeker) return { ...runtime, ready: false, reason: "The seeker's pin is missing." };
     const reference = constraint.referenceFeatureId
       ? runtime.features.find((feature) => feature.id === constraint.referenceFeatureId)
-      : nearestFeature(seeker, runtime.features)?.feature;
+      : nearestFeature(seeker, runtime.features, measurementOptionsForCategory(constraint.category))?.feature;
     if (!reference) return { ...runtime, ready: false, reason: `The seeker's nearest ${spatialCategoryLabel(constraint.category).toLowerCase()} could not be resolved.` };
     runtime.referenceFeature = reference;
     return runtime;
@@ -329,10 +331,19 @@ function prepareConstraint(constraint, context = {}) {
   if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE) {
     const seeker = finitePoint(constraint.seeker);
     if (!seeker) return { ...runtime, ready: false, reason: "The seeker's pin is missing." };
-    const nearest = nearestFeature(seeker, runtime.features, { boundaryOnly: Boolean(constraint.boundaryOnly) });
-    if (!nearest || !Number.isFinite(nearest.distanceMetres)) return { ...runtime, ready: false, reason: `The reference distance to ${spatialCategoryLabel(constraint.category).toLowerCase()} could not be calculated.` };
-    runtime.seekerDistanceMetres = nearest.distanceMetres;
-    runtime.referenceFeature = nearest.feature;
+    const options = measurementOptionsForCategory(constraint.category, { boundaryOnly: Boolean(constraint.boundaryOnly) });
+    const referenceFeature = constraint.referenceFeatureId
+      ? runtime.features.find((feature) => feature.id === constraint.referenceFeatureId)
+      : nearestFeature(seeker, runtime.features, options)?.feature;
+    if (!referenceFeature) return { ...runtime, ready: false, reason: `The reference ${spatialCategoryLabel(constraint.category).toLowerCase()} could not be resolved.` };
+    const calculated = featureDistanceMetres(seeker, referenceFeature, options);
+    const storedDistance = constraint.seekerDistanceMetres == null ? null : Number(constraint.seekerDistanceMetres);
+    const seekerDistance = Number.isFinite(storedDistance) ? storedDistance : calculated;
+    if (!Number.isFinite(seekerDistance)) return { ...runtime, ready: false, reason: `The reference distance to ${spatialCategoryLabel(constraint.category).toLowerCase()} could not be calculated.` };
+    runtime.seekerDistanceMetres = seekerDistance;
+    runtime.referenceFeature = referenceFeature;
+    runtime.referencePoint = finitePoint(constraint.referencePoint) || featureNearestPoint(seeker, referenceFeature, options)?.point || null;
+    runtime.measurementMethod = constraint.measurementMethod || options.method;
     return runtime;
   }
 
@@ -340,7 +351,8 @@ function prepareConstraint(constraint, context = {}) {
     const seeker = finitePoint(constraint.seeker);
     if (!seeker) return { ...runtime, ready: false, reason: "The seeker's pin is missing." };
     const radiusMetres = Number(constraint.radiusMetres) || 2000;
-    runtime.validFeatures = runtime.features.filter((feature) => featureDistanceMetres(seeker, feature) <= radiusMetres);
+    const options = measurementOptionsForCategory(constraint.category);
+    runtime.validFeatures = runtime.features.filter((feature) => featureDistanceMetres(seeker, feature, options) <= radiusMetres);
     if (!runtime.validFeatures.length) return { ...runtime, ready: false, reason: `No imported ${spatialCategoryLabel(constraint.category).toLowerCase()} lie within ${Math.round(radiusMetres / 100) / 10} km of the seeker pin.` };
     runtime.answerFeature = constraint.answerFeatureId
       ? runtime.validFeatures.find((feature) => feature.id === constraint.answerFeatureId)
@@ -383,7 +395,7 @@ function pointPassRuntime(runtime, point) {
     if (answer === "no" || answer === "different") return !same;
   }
   if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH) {
-    const candidate = nearestFeature(point, runtime.features)?.feature;
+    const candidate = nearestFeature(point, runtime.features, measurementOptionsForCategory(constraint.category))?.feature;
     if (!candidate) return null;
     const same = candidate.id === runtime.referenceFeature.id;
     if (answer === "yes" || answer === "same") return same;
@@ -397,7 +409,7 @@ function pointPassRuntime(runtime, point) {
     if (answer === "no" || answer === "different") return !same;
   }
   if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE) {
-    const candidate = nearestFeature(point, runtime.features, { boundaryOnly: Boolean(constraint.boundaryOnly) });
+    const candidate = nearestFeature(point, runtime.features, measurementOptionsForCategory(constraint.category, { boundaryOnly: Boolean(constraint.boundaryOnly) }));
     if (!candidate) return null;
     if (answer === "closer") return candidate.distanceMetres < runtime.seekerDistanceMetres;
     if (answer === "further") return candidate.distanceMetres > runtime.seekerDistanceMetres;
@@ -409,7 +421,7 @@ function pointPassRuntime(runtime, point) {
     if (answer === "further") return candidateDistance > seekerDistance;
   }
   if (constraint.type === DEDUCTION_TOOL_TYPES.TENTACLE) {
-    const candidate = nearestFeature(point, runtime.validFeatures)?.feature;
+    const candidate = nearestFeature(point, runtime.validFeatures, measurementOptionsForCategory(constraint.category))?.feature;
     return candidate ? candidate.id === runtime.answerFeature.id : null;
   }
   if (constraint.type === DEDUCTION_TOOL_TYPES.MANUAL_AREA) {
@@ -430,7 +442,10 @@ export function constraintResolution(constraint, context = {}) {
     manual: runtime.manual,
     reason: runtime.reason,
     featureCount: runtime.features?.length || 0,
-    referenceFeature: runtime.referenceFeature || runtime.answerFeature || null
+    referenceFeature: runtime.referenceFeature || runtime.answerFeature || null,
+    referencePoint: runtime.referencePoint || null,
+    seekerDistanceMetres: runtime.seekerDistanceMetres ?? null,
+    measurementMethod: runtime.measurementMethod || null
   };
 }
 
@@ -738,12 +753,25 @@ function automaticConstraint(question) {
   if ([DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH, DEDUCTION_TOOL_TYPES.REGION_MATCH].includes(input.type) && ["yes", "no"].includes(answer)) {
     const seeker = finitePoint(input.seeker);
     if (!seeker || !input.category) return null;
-    return { ...base, type: input.type, seeker, category: input.category, referenceFeatureId: input.referenceFeatureId || null, answer };
+    return { ...base, type: input.type, seeker, category: input.category, referenceFeatureId: input.referenceFeatureId || null, referenceFeatureName: input.referenceFeatureName || null, referencePoint: finitePoint(input.referencePoint), measurementMethod: input.measurementMethod || null, answer };
   }
   if (input.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE && ["closer", "further"].includes(answer)) {
     const seeker = finitePoint(input.seeker);
     if (!seeker || !input.category) return null;
-    return { ...base, type: input.type, seeker, category: input.category, boundaryOnly: Boolean(input.boundaryOnly), answer };
+    const storedDistance = input.seekerDistanceMetres == null ? null : Number(input.seekerDistanceMetres);
+    return {
+      ...base,
+      type: input.type,
+      seeker,
+      category: input.category,
+      boundaryOnly: Boolean(input.boundaryOnly),
+      referenceFeatureId: input.referenceFeatureId || null,
+      referenceFeatureName: input.referenceFeatureName || null,
+      referencePoint: finitePoint(input.referencePoint),
+      seekerDistanceMetres: Number.isFinite(storedDistance) ? storedDistance : null,
+      measurementMethod: input.measurementMethod || null,
+      answer
+    };
   }
   if (input.type === DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE && ["closer", "further"].includes(answer)) {
     const seeker = finitePoint(input.seeker);
@@ -758,7 +786,8 @@ function automaticConstraint(question) {
       seeker,
       category: input.category,
       radiusMetres: Number(input.radiusMetres) || 2000,
-      answerFeatureName: String(question.answer).trim(),
+      answerFeatureId: question.answerFeatureId || input.answerFeatureId || null,
+      answerFeatureName: String(question.answerFeatureName || question.answer).trim(),
       answer
     };
   }
@@ -812,6 +841,9 @@ export function constraintOverlay(constraint, context = {}) {
       type: "reference",
       seeker: finitePoint(constraint.seeker),
       referenceFeature: runtime.referenceFeature || runtime.answerFeature || null,
+      referencePoint: runtime.referencePoint || finitePoint(constraint.referencePoint),
+      seekerDistanceMetres: runtime.seekerDistanceMetres ?? null,
+      measurementMethod: runtime.measurementMethod || constraint.measurementMethod || null,
       answer: constraint.answer,
       label: constraintTitle(constraint),
       ready: runtime.ready

@@ -1,19 +1,21 @@
 # HideLine — London Hide + Seek Companion
 
-HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.2.2 keeps the live alerts and clickable question coordinates while making the Endgame map substantially clearer and carrying station-wide eliminations across from the All stations map.
+HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.3.0 incorporates the first full game-day playtest: exact custom timers, question forms that retain unsaved coordinates, direct answer viewing, clearer measuring references, built-in official administrative boundaries and easier POI/Tentacle selection.
 
 ![Simple HideLine game screen](assets/screenshot-simple-desktop.png)
 
 ![Simple HideLine deduction map on mobile](assets/screenshot-simple-mobile.png)
 
-## What is new in 2.2.2
+## What is new in 2.3.0
 
-- **Clear Endgame search area:** the selected 500 m circle is now a clean pale-green base. Only genuine hard exclusions are drawn over it in strong red, so the map remains readable.
-- **Earlier clues shown as overlap, not noise:** the former dense purple hatching has been replaced by a light blue planning layer that shows where all earlier movable clues overlap at one point.
-- **All-stations eliminations carry across:** if an earlier answer leaves no valid point anywhere in a station's full 500 m zone, the whole Endgame circle is red rather than incorrectly returning to green.
-- **Plain-language status:** the Endgame panel now shows the All-stations result, current area in play and earlier-clue overlap separately.
-- **Less map clutter:** old radar circles, thermometer lines and POI overlays are no longer redrawn over the Endgame circle. Their combined result remains available through the blue overlap layer.
-- **Previous 2.2 fixes retained:** role-aware pop-ups, optional device alerts, reliable stored coordinates, Google Maps links and deployment diagnostics remain included.
+- **Exact timer starts:** **Start now** records the precise second the button is pressed. A scheduled start is optional and now accepts seconds, so a three-minute test no longer begins part-way through.
+- **Question drafts survive live updates:** coordinates, selected POIs, notes, checkboxes and other unsaved form values are restored after Connected Mode receives a remote update.
+- **Answers are one tap away:** **View answer** opens a complete answer card from the notification, Questions history, latest-answer card or Recent Activity.
+- **Accurate boundary handling:** the exact red Game Area boundary is drawn only from the supplied Google My Map. HideLine attempts to load it automatically; when Google blocks the KML download, the app shows a clearly labelled amber fallback until the KML/KMZ is imported.
+- **Transparent measuring calculations:** the active question and hider map name the exact feature used, show the seeker pin, the exact edge/pin/line point, the measured distance and the method. With hider GPS available, the map also highlights the hider's own nearest valid reference in teal.
+- **Built-in administrative layers:** London boroughs, electoral wards and Westminster constituencies load from built-in official GLA/ONS source definitions and are cached for later game-day use. They no longer depend on the Google My Map import.
+- **Tentacle answer lists:** the hider receives a drop-down containing only the valid mapped POIs within two kilometres of the seeker pin.
+- **POI matching and measuring lists:** when asking park, zoo, museum, cinema, hospital, library, consulate and similar questions, seekers can confirm the exact mapped feature or leave the app to choose the nearest one automatically.
 
 ## What was added in 2.1
 
@@ -69,7 +71,7 @@ The heading shows how many stations remain. The station list, answer audit and m
 
 Before Endgame, each answer is treated as a separate snapshot because the hiders may move within their station zone between questions. In Endgame, all earlier clues are brought into the chosen 500 m circle automatically. A clue that rules out the entire station remains a hard red result; other earlier mobile answers appear only as a blue overlap hint. New Endgame answers are intersected at one fixed location because the hiders must remain at the hiding spot.
 
-Radar, Thermometer, station-name, transit-line and Thames-side deductions work immediately. Coordinate-based question forms include **Pick coordinates from map**, so players do not need to look up or type latitude and longitude manually. Tentacles and questions based on curated points of interest or administrative boundaries need the Google My Maps KML/KMZ imported once under **Map setup and reset**. When source geometry is unavailable, HideLine marks the clue as unresolved rather than inventing an answer.
+Radar, Thermometer, station-name, transit-line and Thames-side deductions work immediately. Coordinate-based question forms include **Pick coordinates from map**, so players do not need to look up or type latitude and longitude manually. Tentacles and questions based on curated points of interest need the Google My Maps KML/KMZ. HideLine tries to load that public map automatically and also offers a one-tap loader or manual import. London borough, electoral ward and constituency polygons load separately from built-in official sources and are cached by the browser. When source geometry is unavailable, HideLine marks the clue as unresolved rather than inventing an answer.
 
 The deduction grid is a planning aid. The official game map and normal player judgement remain authoritative for borderline paths, entrances, station pins and disputed points of interest.
 
@@ -110,7 +112,7 @@ window.HIDELINE_CONFIG = {
 };
 ```
 
-HideLine 2.2.2 requires **no new Supabase migration for notifications, question-pin display or Endgame-map changes**. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
+HideLine 2.3.0 requires **no new Supabase migration**. Timer, form-draft, answer-view, boundary, measuring, boundary-source and POI-list changes are client-side. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
 
 ## Privacy model
 
@@ -124,7 +126,7 @@ Read [`PRIVACY.md`](PRIVACY.md) before operating a public deployment.
 
 ## Map accuracy
 
-The Google My Map remains the authoritative boundary, station and curated-POI reference. OpenStreetMap supplies the visible street and river-bank basemap. HideLine's 614-point Thames guide, deduction grid, station centres, 500 m circles and offline vector map are planning aids rather than surveyed boundaries. Use normal player judgement for bridges, tunnels, islands, foreshore, borderline paths and source-layer disputes.
+The Google My Map remains the authoritative Game Area, station and curated-POI reference. HideLine draws it in red only when that exact polygon has loaded; the amber line is explicitly a fallback guide. OpenStreetMap supplies the visible street and river-bank basemap. Official GLA/ONS services supply the administrative polygons used for borough, ward and constituency questions. HideLine's 614-point Thames guide, deduction grid, station centres, 500 m circles and offline vector map are planning aids rather than surveyed boundaries. Use normal player judgement for bridges, tunnels, islands, foreshore, borderline paths and source-layer disputes.
 
 ## Important safeguards
 
@@ -163,7 +165,7 @@ npm test
 npm run check
 ```
 
-The project is plain HTML, CSS and JavaScript so it remains easy to inspect, change and upload directly to GitHub. The automated checks cover the 100 stations, all 55 linked questions, the 614-point Thames guide, Endgame carry-forward masks, coordinate persistence, pending-question notifications and repository-folder integrity.
+The project is plain HTML, CSS and JavaScript so it remains easy to inspect, change and upload directly to GitHub. The automated checks cover the 100 stations, all 55 linked questions, the 614-point Thames guide, exact timer starts, modal-draft persistence, direct answer viewing, measurement-edge calculations, official administrative source definitions, Tentacle/POI lists, Endgame carry-forward masks and repository-folder integrity.
 
 ## Licence and third-party material
 

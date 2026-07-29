@@ -70,6 +70,8 @@ export function notificationForGameEvent(event, state) {
       iconName: "check",
       view: VIEWS.QUESTIONS,
       actionLabel: "View answer",
+      action: "view-answer",
+      questionInstanceId: payload.questionInstanceId || null,
       tag: `answer:${payload.questionInstanceId || event.id}`
     };
   }

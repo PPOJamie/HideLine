@@ -19,6 +19,7 @@ assert(worker.includes(`hideline-shell-v${APP_VERSION}`), `service-worker.js mus
 assert(worker.includes(`./src/app.js?v=${APP_VERSION}`), "The service worker must cache the versioned app entry file.");
 assert(worker.includes("./src/core/notifications.js"), "The service worker must cache the notifications module.");
 assert(worker.includes("./src/core/question-location.js"), "The service worker must cache the question-location module.");
+assert(worker.includes("./src/services/reference-data.js"), "The service worker must cache the official boundary loader.");
 
 const requiredFiles = [
   "src/app.js",
@@ -29,7 +30,8 @@ const requiredFiles = [
   "src/ui/questions-view.js",
   "src/ui/modals.js",
   "src/ui/shell.js",
-  "src/services/supabase.js"
+  "src/services/supabase.js",
+  "src/services/reference-data.js"
 ];
 for (const relative of requiredFiles) {
   try { await access(resolve(root, relative)); }

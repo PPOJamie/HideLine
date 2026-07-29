@@ -123,6 +123,8 @@ export function questionLocations(record) {
     addPoint(locations, seen, "Question pin", input.sharedPin, "shared-pin");
   }
 
+  addPoint(locations, seen, record?.mapReference?.name ? `Reference: ${record.mapReference.name}` : "Measurement reference", input.referencePoint || record?.mapReference?.point, "reference-point");
+
   const pinLabel = String(record?.pinLabel || record?.pin_label || "").trim();
   if (pinLabel) {
     const pinPoint = pointFromText(pinLabel);

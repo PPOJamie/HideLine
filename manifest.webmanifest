@@ -2,7 +2,7 @@
   "id": "./",
   "name": "HideLine - London Hide + Seek Companion",
   "short_name": "HideLine",
-  "description": "A simple London hide-and-seek companion with live game alerts, clickable question coordinates, a high-contrast Endgame map, timers, scoring and optional team sync.",
+  "description": "A London hide-and-seek companion with reliable timers, persistent question pins, clear measuring references, official administrative boundaries and optional live team sync.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -51,3 +51,6 @@ No database migration is required for live alerts, visible question coordinates,
 
 No database migration is required. Version 2.2.2 changes only client-side Endgame mask calculation and presentation. Existing games, room codes and private team-state JSON remain compatible.
 
+## Upgrade to HideLine 2.3.0
+
+No database migration is required. Version 2.3.0 changes the client-side timer, unsaved question-form draft handling, answer-view controls, game-boundary presentation, measuring references, administrative-boundary loading and POI/Tentacle selectors. Existing rooms, room codes, questions and private team-state JSON remain compatible.

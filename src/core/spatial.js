@@ -139,6 +139,29 @@ export function normaliseSpatialData(value = {}) {
   };
 }
 
+/** Merge imported game-map data with built-in reference layers. Later datasets
+ * take precedence when the same named feature appears more than once. */
+export function mergeSpatialData(...values) {
+  const merged = new Map();
+  const sources = [];
+  let importedAt = null;
+  for (const value of values.filter(Boolean)) {
+    const data = normaliseSpatialData(value);
+    if (data.sourceName && data.sourceName !== "No map data imported") sources.push(data.sourceName);
+    if (data.importedAt && (!importedAt || new Date(data.importedAt) > new Date(importedAt))) importedAt = data.importedAt;
+    for (const feature of data.features) {
+      const key = `${feature.category}:${normaliseSpatialName(feature.name) || feature.id}`;
+      merged.set(key, feature);
+    }
+  }
+  return {
+    version: SPATIAL_DATA_VERSION,
+    sourceName: sources.length ? [...new Set(sources)].join(" + ") : "No map data imported",
+    importedAt,
+    features: [...merged.values()]
+  };
+}
+
 export function spatialDataStats(value = {}) {
   const data = normaliseSpatialData(value);
   const categories = {};
@@ -172,15 +195,29 @@ function localXY(origin, point) {
   };
 }
 
-export function distancePointToSegmentMetres(point, start, end) {
+function pointFromLocalXY(origin, value) {
+  const metresPerDegreeLat = 111_320;
+  const metresPerDegreeLng = metresPerDegreeLat * Math.cos((Number(origin.lat) * Math.PI) / 180);
+  return {
+    lat: Number(origin.lat) + Number(value.y) / metresPerDegreeLat,
+    lng: Number(origin.lng) + Number(value.x) / (metresPerDegreeLng || Number.EPSILON)
+  };
+}
+
+export function nearestPointOnSegment(point, start, end) {
   const a = localXY(point, start);
   const b = localXY(point, end);
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const lengthSquared = dx * dx + dy * dy;
-  if (!lengthSquared) return Math.hypot(a.x, a.y);
+  if (!lengthSquared) return { point: { lat: Number(start.lat), lng: Number(start.lng) }, distanceMetres: Math.hypot(a.x, a.y), t: 0 };
   const t = Math.max(0, Math.min(1, -(a.x * dx + a.y * dy) / lengthSquared));
-  return Math.hypot(a.x + t * dx, a.y + t * dy);
+  const local = { x: a.x + t * dx, y: a.y + t * dy };
+  return { point: pointFromLocalXY(point, local), distanceMetres: Math.hypot(local.x, local.y), t };
+}
+
+export function distancePointToSegmentMetres(point, start, end) {
+  return nearestPointOnSegment(point, start, end).distanceMetres;
 }
 
 function lineCoordinatesToPoints(line = []) {
@@ -196,6 +233,18 @@ export function distancePointToLineMetres(point, line = []) {
   let best = Infinity;
   for (let index = 0; index < points.length - 1; index += 1) {
     best = Math.min(best, distancePointToSegmentMetres(point, points[index], points[index + 1]));
+  }
+  return best;
+}
+
+export function nearestPointOnLine(point, line = []) {
+  const points = lineCoordinatesToPoints(line);
+  if (!points.length) return null;
+  if (points.length === 1) return { point: points[0], distanceMetres: haversineMetres(point, points[0]) };
+  let best = null;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const candidate = nearestPointOnSegment(point, points[index], points[index + 1]);
+    if (!best || candidate.distanceMetres < best.distanceMetres) best = candidate;
   }
   return best;
 }
@@ -238,8 +287,96 @@ function polygonBoundaryDistance(point, polygon = []) {
   return best;
 }
 
-export function geometryDistanceMetres(point, geometry, { boundaryOnly = false } = {}) {
+export function geometryRepresentativePoint(geometry) {
+  if (!geometry) return null;
+  if (geometry.type === "Point") {
+    const [lng, lat] = geometry.coordinates || [];
+    return Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) ? { lat: Number(lat), lng: Number(lng) } : null;
+  }
+  if (geometry.type === "MultiPoint") {
+    const first = geometry.coordinates?.[0];
+    return first ? { lat: Number(first[1]), lng: Number(first[0]) } : null;
+  }
+  const bbox = geometryBbox(geometry);
+  if (!bbox) return null;
+  const centre = { lat: (bbox.south + bbox.north) / 2, lng: (bbox.west + bbox.east) / 2 };
+  if (["Polygon", "MultiPolygon"].includes(geometry.type) && geometryContainsPoint(geometry, centre)) return centre;
+  let totalLat = 0;
+  let totalLng = 0;
+  let count = 0;
+  visitCoordinatePairs(geometryCoordinates(geometry), (lng, lat) => { totalLng += lng; totalLat += lat; count += 1; });
+  return count ? { lat: totalLat / count, lng: totalLng / count } : centre;
+}
+
+export function geometryNearestPoint(point, geometry, { boundaryOnly = false, anchorOnly = false } = {}) {
+  if (!geometry || !point) return null;
+  if (anchorOnly) {
+    const anchor = geometryRepresentativePoint(geometry);
+    return anchor ? { point: anchor, distanceMetres: haversineMetres(point, anchor) } : null;
+  }
+  if (geometry.type === "Point") {
+    const anchor = geometryRepresentativePoint(geometry);
+    return anchor ? { point: anchor, distanceMetres: haversineMetres(point, anchor) } : null;
+  }
+  if (geometry.type === "MultiPoint") {
+    let best = null;
+    for (const coordinates of geometry.coordinates || []) {
+      const candidatePoint = { lat: Number(coordinates?.[1]), lng: Number(coordinates?.[0]) };
+      if (![candidatePoint.lat, candidatePoint.lng].every(Number.isFinite)) continue;
+      const candidate = { point: candidatePoint, distanceMetres: haversineMetres(point, candidatePoint) };
+      if (!best || candidate.distanceMetres < best.distanceMetres) best = candidate;
+    }
+    return best;
+  }
+  if (geometry.type === "LineString") return nearestPointOnLine(point, geometry.coordinates || []);
+  if (geometry.type === "MultiLineString") {
+    let best = null;
+    for (const line of geometry.coordinates || []) {
+      const candidate = nearestPointOnLine(point, line);
+      if (candidate && (!best || candidate.distanceMetres < best.distanceMetres)) best = candidate;
+    }
+    return best;
+  }
+  if (geometry.type === "Polygon" || geometry.type === "MultiPolygon") {
+    if (!boundaryOnly && geometryContainsPoint(geometry, point)) return { point: { lat: Number(point.lat), lng: Number(point.lng) }, distanceMetres: 0 };
+    const polygons = geometry.type === "Polygon" ? [geometry.coordinates || []] : geometry.coordinates || [];
+    let best = null;
+    for (const polygon of polygons) {
+      for (const ring of polygon || []) {
+        const candidate = nearestPointOnLine(point, ring);
+        if (candidate && (!best || candidate.distanceMetres < best.distanceMetres)) best = candidate;
+      }
+    }
+    return best;
+  }
+  if (geometry.type === "GeometryCollection") {
+    let best = null;
+    for (const child of geometry.geometries || []) {
+      const candidate = geometryNearestPoint(point, child, { boundaryOnly, anchorOnly });
+      if (candidate && (!best || candidate.distanceMetres < best.distanceMetres)) best = candidate;
+    }
+    return best;
+  }
+  return null;
+}
+
+export function measurementOptionsForCategory(category, { boundaryOnly = false } = {}) {
+  if (boundaryOnly || ["water", "borough", "constituency", "ward"].includes(category)) return { boundaryOnly: true, anchorOnly: false, method: "nearest boundary or edge" };
+  if (["high_speed_rail", "street_path"].includes(category)) return { boundaryOnly: false, anchorOnly: false, method: "nearest point on the mapped line" };
+  return { boundaryOnly: false, anchorOnly: true, method: "curated map pin" };
+}
+
+export function featureAnchorPoint(feature) {
+  return geometryRepresentativePoint(feature?.geometry);
+}
+
+export function featureNearestPoint(point, feature, options = {}) {
+  return feature?.geometry ? geometryNearestPoint(point, feature.geometry, options) : null;
+}
+
+export function geometryDistanceMetres(point, geometry, { boundaryOnly = false, anchorOnly = false } = {}) {
   if (!geometry || !point) return Infinity;
+  if (anchorOnly) return geometryNearestPoint(point, geometry, { anchorOnly: true })?.distanceMetres ?? Infinity;
   if (geometry.type === "Point") {
     const [lng, lat] = geometry.coordinates || [];
     return Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) ? haversineMetres(point, { lat: Number(lat), lng: Number(lng) }) : Infinity;
@@ -348,6 +485,24 @@ export function resolveFeatureAnswer(answer, features = []) {
     }
   }
   return bestScore <= 0.34 ? best : null;
+}
+
+function decimateCoordinates(value, limit = 240) {
+  if (!Array.isArray(value)) return value;
+  if (value.length && Number.isFinite(Number(value[0])) && Number.isFinite(Number(value[1]))) return [Number(value[0]), Number(value[1])];
+  if (value.length > limit && value.every((item) => Array.isArray(item) && Number.isFinite(Number(item[0])) && Number.isFinite(Number(item[1])))) {
+    const step = Math.ceil(value.length / limit);
+    const output = value.filter((_, index) => index % step === 0);
+    if (value.length && output.at(-1) !== value.at(-1)) output.push(value.at(-1));
+    return output.map((item) => decimateCoordinates(item, limit));
+  }
+  return value.map((item) => decimateCoordinates(item, limit));
+}
+
+export function compactGeometry(geometry, limit = 240) {
+  if (!geometry?.type) return null;
+  if (geometry.type === "GeometryCollection") return { type: geometry.type, geometries: (geometry.geometries || []).slice(0, 12).map((item) => compactGeometry(item, limit)).filter(Boolean) };
+  return { type: geometry.type, coordinates: decimateCoordinates(geometry.coordinates, limit) };
 }
 
 export function pointInManualArea(point, constraint) {

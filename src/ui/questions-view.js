@@ -20,6 +20,20 @@ function filteredQuestions(state) {
   });
 }
 
+function renderMapReference(record) {
+  const reference = record?.mapReference;
+  if (!reference?.name) return "";
+  const distance = Number(reference.seekerDistanceMetres);
+  const distanceText = Number.isFinite(distance) ? `${Math.round(distance)} m from the seeker pin` : "";
+  return `<section class="question-reference-card"><div class="question-reference-icon">${icon("measure")}</div><div><span>Map reference used</span><strong>${escapeHtml(reference.name)}</strong><p>${escapeHtml([reference.method, distanceText].filter(Boolean).join(" · "))}</p>${reference.explanation ? `<p class="measurement-explanation">${escapeHtml(reference.explanation)}</p>` : ""}<small>${escapeHtml(reference.source || "Game map")}</small></div></section>`;
+}
+
+function renderChoiceAnswer(record) {
+  const choices = Array.isArray(record.answerChoices) ? record.answerChoices : [];
+  if (!choices.length) return "";
+  return `<form class="choice-answer-form" data-form="choice-answer" data-question-instance="${escapeHtml(record.id)}"><div class="field"><label for="choice-${escapeHtml(record.id)}">Choose the mapped answer</label><select id="choice-${escapeHtml(record.id)}" name="answerFeatureId" required><option value="">Select one…</option>${choices.map((choice) => { const metres = Number(choice.distanceFromSeekerMetres); const suffix = Number.isFinite(metres) ? ` — ${metres < 1000 ? `${Math.round(metres)} m` : `${(metres / 1000).toFixed(1)} km`} from seeker pin` : ""; return `<option value="${escapeHtml(choice.id)}">${escapeHtml(choice.name + suffix)}</option>`; }).join("")}</select><span class="field-hint">Only mapped places within 2 km of the seeker pin are listed.</span></div><div class="field"><label for="choice-note-${escapeHtml(record.id)}">Optional explanation</label><textarea id="choice-note-${escapeHtml(record.id)}" name="note" maxlength="400"></textarea></div><button class="button button-primary" type="submit">${icon("check")} Submit selected answer</button></form>`;
+}
+
 function renderActiveQuestion(record, now, canAnswer) {
   const definition = QUESTION_BY_ID.get(record.questionId) || record;
   const remaining = questionSecondsRemaining(record, now);
@@ -32,11 +46,12 @@ function renderActiveQuestion(record, now, canAnswer) {
     </div>
     <div class="simple-question-prompt">${escapeHtml(record.prompt || definition.prompt)}</div>
     ${renderQuestionLocations(record)}
+    ${renderMapReference(record)}
     ${record.note ? `<p class="muted small question-clarification"><strong>Question note:</strong> ${escapeHtml(record.note)}</p>` : ""}
-    ${canAnswer ? `<div class="answer-grid simple-answer-grid">
-      ${answerOptions.filter((option) => option !== "Photo submitted").map((option) => `<button type="button" class="answer-button" data-action="answer-question" data-question-instance="${record.id}" data-answer="${escapeHtml(option)}">${escapeHtml(option)}</button>`).join("")}
+    ${canAnswer ? `${renderChoiceAnswer(record)}<div class="answer-grid simple-answer-grid">
+      ${answerOptions.filter((option) => !["Photo submitted", "POI name"].includes(option)).map((option) => `<button type="button" class="answer-button" data-action="answer-question" data-question-instance="${record.id}" data-answer="${escapeHtml(option)}">${escapeHtml(option)}</button>`).join("")}
       ${definition.photo ? `<button type="button" class="answer-button" data-action="open-answer-photo" data-question-instance="${record.id}">${icon("camera")} Add photo</button>` : ""}
-      ${definition.customInput || answerOptions.includes("POI name") ? `<button type="button" class="answer-button" data-action="open-custom-answer" data-question-instance="${record.id}">${icon("edit")} Type answer</button>` : ""}
+      ${(definition.customInput || answerOptions.includes("POI name")) && !(record.answerChoices || []).length ? `<button type="button" class="answer-button" data-action="open-custom-answer" data-question-instance="${record.id}">${icon("edit")} Type answer</button>` : ""}
     </div>` : `<div class="callout">${icon("clock")}<p><strong>Waiting for the hider team.</strong>The timer is shared across the room.</p></div>`}
     ${overdue ? `<div class="callout danger">${icon("alert")}<p><strong>Time is up.</strong>Pause the game until the answer is complete; no card reward is earned.</p></div>` : ""}
   </article>`;
@@ -62,10 +77,18 @@ function renderHistory(state, now) {
       ${history.length ? `<div class="simple-list">${history.slice(0, 40).map((record) => {
         const definition = QUESTION_BY_ID.get(record.questionId) || record;
         const hasEvidence = Boolean(record.evidencePath || record.evidenceKey || record.evidenceDataUrl);
-        return `<div class="simple-list-row"><span><strong>${escapeHtml(record.questionName || definition.name)}</strong><small>${escapeHtml(record.answer || "No answer")} · ${relativeTime(record.askedAt, now)}${record.occurrence > 1 ? ` · repeat x${record.occurrence}` : ""}</small></span><span class="question-history-actions">${renderQuestionLocations(record, { compact: true })}${hasEvidence ? `<button class="button button-soft button-small" type="button" data-action="view-evidence" data-question-instance="${record.id}">${icon("camera")} Photo</button>` : ""}</span></div>`;
+        return `<div class="simple-list-row"><span><strong>${escapeHtml(record.questionName || definition.name)}</strong><small>${escapeHtml(record.answer || "No answer")} · ${relativeTime(record.askedAt, now)}${record.occurrence > 1 ? ` · repeat x${record.occurrence}` : ""}</small></span><span class="question-history-actions"><button class="button button-primary button-small" type="button" data-action="view-answer" data-question-instance="${record.id}">${icon("eye")} View answer</button>${renderQuestionLocations(record, { compact: true })}${hasEvidence ? `<button class="button button-soft button-small" type="button" data-action="view-evidence" data-question-instance="${record.id}">${icon("camera")} Photo</button>` : ""}</span></div>`;
       }).join("")}</div>` : `<p class="muted">Completed questions will appear here.</p>`}
     </div>
   </details>`;
+}
+
+function renderLatestAnswer(state, now) {
+  const record = state.questions
+    .filter((question) => question.status === "answered")
+    .sort((a, b) => new Date(b.answeredAt || b.askedAt) - new Date(a.answeredAt || a.askedAt))[0];
+  if (!record) return "";
+  return `<section class="card card-pad latest-answer-card"><div><p class="eyebrow">Latest answer</p><h2>${escapeHtml(record.questionName || "Question")}</h2><p><strong>${escapeHtml(record.answer || "No answer")}</strong> · ${relativeTime(record.answeredAt || record.askedAt, now)}</p></div><button class="button button-primary" type="button" data-action="view-answer" data-question-instance="${escapeHtml(record.id)}">${icon("eye")} View full answer</button></section>`;
 }
 
 export function renderQuestionsView(state, now = Date.now()) {
@@ -89,6 +112,7 @@ export function renderQuestionsView(state, now = Date.now()) {
 
   return `<div class="view-stack simple-questions-view">
     ${active.length ? `<div class="question-list">${active.map((record) => renderActiveQuestion(record, now, canAnswer)).join("")}</div>` : `<section class="card card-pad simple-question-status"><div><p class="eyebrow">${isHider ? "Hider" : "Seeker"}</p><h2>${isHider ? "No question is waiting" : "Choose the next question"}</h2><p>${isHider ? "When the seekers ask, the answer timer will appear here." : "The map will update automatically after an answer whenever enough location data is available."}</p></div><span class="simple-status-icon">${icon(activePhase ? "questions" : "clock")}</span></section>`}
+    ${renderLatestAnswer(state, now)}
 
     <section class="card card-pad simple-question-browser">
       <div class="section-head"><div><h2>Question list</h2><p>Pick a category or search by what you want to learn.</p></div><div class="simple-map-link">${icon("map")} Answers feed the map</div></div>

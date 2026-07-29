@@ -2,6 +2,20 @@
 
 All notable changes to HideLine are documented here.
 
+## 2.3.0 — Game-day reliability, measuring clarity and built-in boundaries
+
+- Fixed custom rounds starting part-way through by making **Start now** use the exact button-press timestamp and moving scheduled clock times behind an explicit option with second precision.
+- Preserved every unsaved question-form control, including coordinates and POI selections, across Connected Mode renders and reference-data updates.
+- Added direct **View answer** actions to notifications, the latest-answer card, question history and Recent Activity, with one complete answer-details view.
+- Stopped presenting the approximate game-area guide as an authoritative red boundary. The supplied Google My Map is loaded automatically when possible and its exact imported polygon is the only red boundary; the fallback is amber and clearly labelled.
+- Made Measuring deductions transparent by storing and displaying the selected feature, exact edge/pin/line point, measurement method, seeker distance and source geometry.
+- Added orange seeker-reference overlays and teal hider-reference overlays to the hider map when current GPS is available.
+- Added built-in, cached official boundary loaders for GLA London boroughs, ONS December 2025 electoral wards and ONS July 2024 Westminster constituencies.
+- Added a mapped Tentacle answer drop-down containing only valid POIs within 2 km of the seeker pin.
+- Added feature lists for POI Matching and Measuring questions, with automatic nearest-feature selection when the seeker leaves the list blank.
+- Fixed missing measurement distances being interpreted as zero metres.
+- Added regression tests for all eight playtest issues. No Supabase migration is required.
+
 ## 2.2.2 — Clear Endgame area and correct carry-forward
 
 - Replaced the dense purple exclusion hatching with a light-blue earlier-clue overlap layer.

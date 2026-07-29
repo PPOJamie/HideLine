@@ -26,7 +26,20 @@ import { compressImage } from "./services/media.js";
 import { clearEvidenceStore, getLocalEvidenceUrl, saveLocalEvidence } from "./services/evidence.js";
 import { fetchTflStatus } from "./services/tfl.js";
 import { fetchConfiguredSpatialData, parseSpatialDataFile } from "./services/spatial-data.js";
-import { normaliseSpatialData } from "./core/spatial.js";
+import { clearOfficialBoundaryCache, loadOfficialBoundaryData } from "./services/reference-data.js";
+import {
+  compactGeometry,
+  containingFeature,
+  featureAnchorPoint,
+  featureDistanceMetres,
+  featureNearestPoint,
+  featuresForCategory,
+  measurementOptionsForCategory,
+  mergeSpatialData,
+  nearestFeature,
+  normaliseSpatialData,
+  spatialCategoryLabel
+} from "./core/spatial.js";
 import { cachedStationCoordinates, resolveStationCoordinates } from "./services/stations.js";
 import {
   beginDeductionMapPick,
@@ -59,6 +72,7 @@ class HideLineApp {
     this.sync = new SupabaseSync();
     this.location = new LocationService();
     this.modalContext = null;
+    this.modalDraft = null;
     this.coordinatePickerContext = null;
     this.coordinatePickerRenderToken = 0;
     this.deferredInstallPrompt = null;
@@ -74,6 +88,7 @@ class HideLineApp {
     this.seenRemoteEventIds = new Set();
     this.alertedQuestionIds = new Set();
     this.notificationSweepTimer = null;
+    this.publicMapLoadAttempted = false;
   }
 
   async init() {
@@ -93,6 +108,8 @@ class HideLineApp {
     this.registerServiceWorker();
     await this.autoConnect();
     this.syncPendingQuestionNotifications();
+    this.loadReferenceData().catch((error) => console.warn("Official boundary data could not be loaded", error));
+    this.ensureConfiguredGameMapData().catch((error) => console.warn("Configured game map could not be loaded automatically", error));
     const joinCode = new URLSearchParams(location.search).get("join");
     if (joinCode && !this.store.get().game) this.openModal("join-game");
   }
@@ -111,6 +128,7 @@ class HideLineApp {
       if (event.target?.id !== "app-modal") return;
       this.closeCoordinatePicker();
       this.modalContext = null;
+      this.modalDraft = null;
       this.revokeEvidenceUrl();
     }, true);
     window.addEventListener("beforeinstallprompt", (event) => {
@@ -146,7 +164,7 @@ class HideLineApp {
         const connectedHider = state.connection.mode === "connected" && state.game && state.profile.team === state.game.hiderTeam;
         const effectiveMapMode = connectedHider && state.ui.mapMode === "deduction" ? "zone" : state.ui.mapMode;
         if (effectiveMapMode === "zone") {
-          updateZoneMap({ station: this.stationMapObject(), positions: this.mapPositions(), radiusMetres: DEFAULT_DURATIONS.hidingZoneRadiusMetres });
+          updateZoneMap({ station: this.stationMapObject(), positions: this.mapPositions(), radiusMetres: DEFAULT_DURATIONS.hidingZoneRadiusMetres, question: this.pendingQuestion(), spatialFeatures: this.combinedSpatialData(state).features });
         }
       }
       return;
@@ -358,6 +376,7 @@ class HideLineApp {
 
   render({ preserveFocus = true } = {}) {
     const focus = preserveFocus ? this.captureFocus() : null;
+    this.captureModalDraft();
     const state = this.store.get();
     const now = Date.now();
     let content;
@@ -384,7 +403,7 @@ class HideLineApp {
       destroyDeductionMap();
       const station = this.stationMapObject();
       const positions = this.mapPositions();
-      renderZoneMap({ station, positions, radiusMetres: DEFAULT_DURATIONS.hidingZoneRadiusMetres }).catch((error) => {
+      renderZoneMap({ station, positions, radiusMetres: DEFAULT_DURATIONS.hidingZoneRadiusMetres, question: this.pendingQuestion(), spatialFeatures: this.combinedSpatialData(state).features }).catch((error) => {
         renderMapFallback("zone-map", error.message);
         this.toast(error.message, "warning");
       });
@@ -449,9 +468,69 @@ class HideLineApp {
     if (focus.selectionStart != null && element.setSelectionRange) element.setSelectionRange(focus.selectionStart, focus.selectionEnd);
   }
 
+  modalDraftKey(context = this.modalContext) {
+    if (!context?.name) return "";
+    const identity = context.questionId || context.questionInstanceId || context.id || "default";
+    return `${context.name}:${identity}`;
+  }
+
+  captureModalDraft() {
+    const dialog = document.getElementById("app-modal");
+    if (!this.modalContext || !dialog?.open) return;
+    const form = dialog.querySelector("form");
+    if (!form) return;
+    const controls = [...form.elements].flatMap((control, index) => {
+      if (!control?.name || ["file", "submit", "button", "reset"].includes(String(control.type || "").toLowerCase())) return [];
+      if (control instanceof HTMLSelectElement && control.multiple) {
+        return [{ name: control.name, index, kind: "multiple", value: [...control.selectedOptions].map((option) => option.value) }];
+      }
+      if (["checkbox", "radio"].includes(String(control.type || "").toLowerCase())) {
+        return [{ name: control.name, index, kind: control.type, value: control.value, checked: control.checked }];
+      }
+      return [{ name: control.name, index, kind: "value", value: control.value }];
+    });
+    this.modalDraft = {
+      key: this.modalDraftKey(),
+      controls,
+      details: [...form.querySelectorAll("details")].map((details) => details.open),
+      scrollTop: dialog.querySelector(".modal-body")?.scrollTop || 0
+    };
+  }
+
+  restoreModalDraft() {
+    const dialog = document.getElementById("app-modal");
+    const draft = this.modalDraft;
+    if (!draft || draft.key !== this.modalDraftKey() || !dialog) return;
+    const form = dialog.querySelector("form");
+    if (!form) return;
+    const controls = [...form.elements];
+    for (const saved of draft.controls || []) {
+      const control = controls[saved.index] && controls[saved.index].name === saved.name
+        ? controls[saved.index]
+        : controls.find((candidate) => candidate.name === saved.name && (saved.kind !== "radio" || candidate.value === saved.value));
+      if (!control) continue;
+      if (saved.kind === "multiple" && control instanceof HTMLSelectElement) {
+        const values = new Set(saved.value || []);
+        [...control.options].forEach((option) => { option.selected = values.has(option.value); });
+      } else if (["checkbox", "radio"].includes(saved.kind)) control.checked = Boolean(saved.checked);
+      else control.value = saved.value ?? "";
+    }
+    [...form.querySelectorAll("details")].forEach((details, index) => {
+      if (typeof draft.details?.[index] === "boolean") details.open = draft.details[index];
+    });
+    form.querySelectorAll('[name$="Lat"], [name$="Lng"]').forEach((control) => {
+      const match = String(control.name || "").match(/^(.*)(Lat|Lng)$/);
+      if (match) this.updateCoordinateSummary(form, match[1]);
+    });
+    const body = dialog.querySelector(".modal-body");
+    if (body) body.scrollTop = draft.scrollTop || 0;
+  }
+
   openModal(name, context = {}) {
     if (this.modalContext?.name === "evidence-preview" && name !== "evidence-preview") this.revokeEvidenceUrl();
-    this.modalContext = { name, ...context };
+    const nextContext = { name, ...context };
+    if (this.modalDraftKey(nextContext) !== this.modalDraftKey()) this.modalDraft = null;
+    this.modalContext = nextContext;
     this.renderCurrentModal();
   }
 
@@ -459,8 +538,10 @@ class HideLineApp {
     if (!this.modalContext) return;
     const dialog = document.getElementById("app-modal");
     if (!dialog) return;
+    if (dialog.open) this.captureModalDraft();
     dialog.innerHTML = renderModal(this.modalContext.name, this.store.get(), this.modalContext);
     if (!dialog.open) dialog.showModal();
+    this.restoreModalDraft();
   }
 
   restoreModal() {
@@ -477,6 +558,7 @@ class HideLineApp {
     const dialog = document.getElementById("app-modal");
     if (dialog?.open) dialog.close();
     this.modalContext = null;
+    this.modalDraft = null;
     this.revokeEvidenceUrl();
   }
 
@@ -511,7 +593,7 @@ class HideLineApp {
         <span class="game-alert-icon">${icon(notice.iconName || "bell")}</span>
         <div class="game-alert-copy"><span>Live game update</span><strong>${escapeHtml(notice.title)}</strong><p>${escapeHtml(notice.body)}</p></div>
         <div class="game-alert-actions">
-          ${notice.actionLabel ? `<button class="button button-primary button-small" type="button" data-action="notification-navigate" data-view="${escapeHtml(notice.view || VIEWS.PLAY)}" data-id="${escapeHtml(notice.id)}">${escapeHtml(notice.actionLabel)}</button>` : ""}
+          ${notice.actionLabel ? `<button class="button button-primary button-small" type="button" data-action="notification-navigate" data-view="${escapeHtml(notice.view || VIEWS.PLAY)}" data-id="${escapeHtml(notice.id)}" data-notification-action="${escapeHtml(notice.action || "navigate")}" data-question-instance="${escapeHtml(notice.questionInstanceId || "")}">${escapeHtml(notice.actionLabel)}</button>` : ""}
           <button class="icon-button" type="button" data-action="notification-dismiss" data-id="${escapeHtml(notice.id)}" aria-label="Dismiss notification">×</button>
         </div>
       </article>`).join("");
@@ -529,7 +611,7 @@ class HideLineApp {
     this.dismissGameNotification(`question:${questionInstanceId}`);
   }
 
-  showGameNotification({ title, body, tone = "info", iconName = "bell", actionLabel = "Open", view = VIEWS.PLAY, tag = "", urgent = false, persistent = false, questionInstanceId = null } = {}) {
+  showGameNotification({ title, body, tone = "info", iconName = "bell", actionLabel = "Open", view = VIEWS.PLAY, tag = "", urgent = false, persistent = false, questionInstanceId = null, action = "navigate" } = {}) {
     const id = tag || randomId("notice");
     const previous = this.activeNotifications.find((item) => item.id === id);
     if (previous?.timer) clearTimeout(previous.timer);
@@ -544,7 +626,8 @@ class HideLineApp {
       view,
       urgent: Boolean(urgent),
       persistent: Boolean(persistent),
-      questionInstanceId
+      questionInstanceId,
+      action
     };
     if (!notice.persistent) notice.timer = setTimeout(() => this.dismissGameNotification(id), urgent ? 18_000 : 11_000);
     const next = [notice, ...this.activeNotifications];
@@ -686,7 +769,17 @@ class HideLineApp {
         case "close-modal": this.closeModal(); break;
         case "dismiss-toast": button.closest(".toast")?.remove(); break;
         case "notification-dismiss": this.dismissGameNotification(button.dataset.id); break;
-        case "notification-navigate": this.dismissGameNotification(button.dataset.id); this.store.patch("ui.view", button.dataset.view || VIEWS.PLAY); this.updateUrlView(button.dataset.view || VIEWS.PLAY); break;
+        case "notification-navigate": {
+          const notice = this.activeNotifications.find((item) => item.id === button.dataset.id);
+          const targetView = button.dataset.view || notice?.view || VIEWS.PLAY;
+          const questionInstanceId = button.dataset.questionInstance || notice?.questionInstanceId || null;
+          const notificationAction = button.dataset.notificationAction || notice?.action || "navigate";
+          this.dismissGameNotification(button.dataset.id);
+          this.store.patch("ui.view", targetView);
+          this.updateUrlView(targetView);
+          if (notificationAction === "view-answer" && questionInstanceId) this.openModal("answer-details", { questionInstanceId });
+          break;
+        }
         case "enable-notifications": await this.enableDeviceNotifications(); break;
         case "disable-notifications": this.disableDeviceNotifications(); break;
         case "test-notification": this.testGameNotification(); break;
@@ -714,12 +807,14 @@ class HideLineApp {
         case "deduction-reset": await this.resetDeductionRound(); break;
         case "spatial-data-load-configured": await this.loadConfiguredSpatialData(button); break;
         case "spatial-data-clear": await this.clearSpatialData(); break;
+        case "reference-data-refresh": await this.loadReferenceData({ force: true, announce: true }); break;
         case "tool-tab": this.store.patch("ui.selectedTool", button.dataset.tool); break;
         case "question-category": this.store.patch("ui.questionCategory", button.dataset.category); break;
         case "open-ask-question": this.assertCanAskQuestion(); this.openModal("ask-question", { questionId: button.dataset.questionId }); break;
         case "open-custom-answer": this.assertCanAnswerQuestion(); this.openModal("custom-answer", { questionInstanceId: button.dataset.questionInstance }); break;
         case "open-answer-photo": this.assertCanAnswerQuestion(); this.openModal("photo-answer", { questionInstanceId: button.dataset.questionInstance }); break;
         case "answer-question": await this.answerQuestion(button.dataset.questionInstance, button.dataset.answer); break;
+        case "view-answer": this.openModal("answer-details", { questionInstanceId: button.dataset.questionInstance }); break;
         case "view-evidence": await this.viewEvidence(button.dataset.questionInstance); break;
         case "toggle-pause": await this.togglePause(); break;
         case "mark-found": this.openModal("mark-found"); break;
@@ -754,6 +849,7 @@ class HideLineApp {
 
   handleInput(event) {
     const action = event.target.dataset.action;
+    if (event.target.closest?.("#app-modal form")) this.captureModalDraft();
     const coordinateMatch = String(event.target.name || "").match(/^(.*)(Lat|Lng)$/);
     if (coordinateMatch) this.updateCoordinateSummary(event.target.closest("form"), coordinateMatch[1]);
     if (action === "question-search") this.debouncedPatch("ui.questionSearch", event.target.value);
@@ -763,6 +859,7 @@ class HideLineApp {
 
   async handleChange(event) {
     const action = event.target.dataset.action;
+    if (event.target.closest?.("#app-modal form")) this.captureModalDraft();
     if (action === "location-visibility") {
       const value = event.target.value;
       this.store.patch("location.shareWith", value);
@@ -821,6 +918,7 @@ class HideLineApp {
         case "deduction-constraint": await this.addDeductionConstraint(form, data); break;
         case "spatial-data-import": await this.importSpatialData(form); break;
         case "custom-answer": await this.answerQuestion(form.dataset.questionInstance, data.answer, data.note); break;
+        case "choice-answer": await this.answerQuestionChoice(form.dataset.questionInstance, data); break;
         case "photo-answer": await this.answerPhoto(form, data); break;
         case "mark-found": await this.markFound(data); break;
         default: break;
@@ -1122,8 +1220,9 @@ class HideLineApp {
   async startRound(data) {
     const game = structuredClone(this.store.get().game);
     if (!game) throw new Error("Create or join a game first.");
-    const parsedStart = Date.parse(data.roundStart);
-    if (!Number.isFinite(parsedStart)) throw new Error("Choose a valid round start time.");
+    const useScheduledStart = data.startMode === "scheduled";
+    const parsedStart = useScheduledStart ? Date.parse(data.roundStart) : Date.now();
+    if (!Number.isFinite(parsedStart)) throw new Error("Choose a valid scheduled round start time.");
     const startedAt = new Date(parsedStart).toISOString();
     const hidingMinutes = Math.max(1, number(data.hidingMinutes, 45));
     const cutoffMinutes = Math.max(hidingMinutes + 1, number(data.cutoffMinutes, 285));
@@ -1304,6 +1403,31 @@ class HideLineApp {
       round,
       phase: state.game?.phase || PHASES.SEEKING,
       deductionInput,
+      answerChoices: Array.isArray(deductionInput?.answerChoices) ? deductionInput.answerChoices : [],
+      mapReference: deductionInput?.referenceFeatureId ? (() => {
+        const category = deductionInput.referenceCategory || deductionInput.category || "unknown";
+        const categoryLabel = spatialCategoryLabel(category).toLowerCase();
+        const type = deductionInput.type || "mapped-reference";
+        const explanation = type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE
+          ? `The seeker distance is measured to the exact orange point shown. Hider locations are compared with their own nearest valid ${categoryLabel}.`
+          : type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH
+            ? `This is the seeker's nearest valid ${categoryLabel}. The hider answers whether their own nearest valid place is the same.`
+            : type === DEDUCTION_TOOL_TYPES.REGION_MATCH
+              ? `This is the official boundary containing the seeker pin. The hider answers whether their current location is in the same area.`
+              : "This mapped feature is the reference used by the deduction map.";
+        return {
+          id: deductionInput.referenceFeatureId,
+          name: deductionInput.referenceFeatureName || "Map reference",
+          category,
+          type,
+          point: deductionInput.referencePoint || null,
+          geometry: deductionInput.referenceGeometry || null,
+          source: deductionInput.referenceSource || "game map",
+          seekerDistanceMetres: deductionInput.seekerDistanceMetres ?? null,
+          method: deductionInput.measurementMethod || "mapped reference",
+          explanation
+        };
+      })() : null,
       note: String(data.note || "").trim(),
       pinLabel: String(data.pinLabel || "").trim(),
       locations: [],
@@ -1326,7 +1450,7 @@ class HideLineApp {
     this.toast(`Question asked. Hiders have ${definition.responseSeconds / 60} minutes.`, "success");
   }
 
-  async answerQuestion(instanceId, answer, note = "", evidence = {}) {
+  async answerQuestion(instanceId, answer, note = "", evidence = {}, metadata = {}) {
     this.assertCanAnswerQuestion();
     const state = this.store.get();
     const index = state.questions.findIndex((question) => question.id === instanceId);
@@ -1341,16 +1465,24 @@ class HideLineApp {
     record.answeredByName = state.profile.name;
     record.status = "answered";
     record.rewardEarned = remaining >= 0;
-    Object.assign(record, evidence);
+    Object.assign(record, evidence, metadata);
     const questions = [...state.questions];
     questions[index] = record;
     this.store.patch("questions", questions);
     await this.patchGameRemote({ questions });
-    await this.recordEvent("answer", { questionInstanceId: instanceId, questionName: record.questionName, answer: record.answer, note: record.answerNote, rewardEarned: record.rewardEarned, evidencePath: record.evidencePath || null, round: record.round });
+    await this.recordEvent("answer", { questionInstanceId: instanceId, questionName: record.questionName, answer: record.answer, answerFeatureId: record.answerFeatureId || null, note: record.answerNote, rewardEarned: record.rewardEarned, evidencePath: record.evidencePath || null, round: record.round });
     this.dismissQuestionNotification(instanceId);
     this.closeModal();
     if (record.rewardEarned) this.toast(`Answer recorded. Draw ${record.reward.draw}, keep ${record.reward.keep}.`, "success");
     else this.toast("Answer recorded after the deadline: pause required and no reward earned.", "warning");
+  }
+
+  async answerQuestionChoice(instanceId, data) {
+    const record = this.store.get().questions.find((question) => question.id === instanceId);
+    if (!record) throw new Error("Question instance not found.");
+    const choice = (record.answerChoices || []).find((item) => item.id === data.answerFeatureId);
+    if (!choice) throw new Error("Choose one of the mapped answers from the list.");
+    await this.answerQuestion(instanceId, choice.name, data.note || "", {}, { answerFeatureId: choice.id, answerFeatureName: choice.name });
   }
 
   async answerPhoto(form, data) {
@@ -1672,11 +1804,44 @@ class HideLineApp {
     return points;
   }
 
+  combinedSpatialData(state = this.store.get()) {
+    return mergeSpatialData(state.privateTeamState?.spatialData, state.referenceData);
+  }
+
+  async loadReferenceData({ force = false, announce = false } = {}) {
+    if (this.store.get().referenceData?.status === "loading" && !force) return;
+    this.store.patch("referenceData", { ...this.store.get().referenceData, status: "loading", error: null }, { source: "reference-data", persist: false });
+    try {
+      if (force) await clearOfficialBoundaryCache();
+      const data = await loadOfficialBoundaryData({ force });
+      this.store.patch("referenceData", { ...data, status: data.errors?.length ? "partial" : "ready", updatedAt: data.importedAt, error: data.errors?.join(" ") || null }, { source: "reference-data", persist: false });
+      if (announce) this.toast(`${data.features.length} official borough, ward and constituency boundaries are ready.`, "success");
+    } catch (error) {
+      this.store.patch("referenceData", { status: "error", updatedAt: null, sourceName: "Built-in official administrative boundaries", features: [], sources: [], errors: [error.message], error: error.message }, { source: "reference-data", persist: false });
+      if (announce) this.toast(error.message, "warning");
+    }
+  }
+
+  async ensureConfiguredGameMapData() {
+    if (this.publicMapLoadAttempted) return;
+    const current = normaliseSpatialData(this.store.get().privateTeamState?.spatialData);
+    if (current.features.some((feature) => feature.category === "game_boundary")) return;
+    this.publicMapLoadAttempted = true;
+    try {
+      const spatialData = await fetchConfiguredSpatialData();
+      if (!spatialData.features.some((feature) => feature.category === "game_boundary")) return;
+      await this.saveSpatialData(spatialData, "");
+    } catch {
+      // Google may block cross-origin KML downloads on some phones. The map
+      // setup panel keeps the explicit import option available in that case.
+    }
+  }
+
   async saveSpatialData(spatialData, successMessage) {
     const normalised = normaliseSpatialData(spatialData);
     this.store.patch("privateTeamState.spatialData", normalised);
     await this.savePrivateTeamState();
-    this.toast(successMessage || `${normalised.features.length} map features imported.`, "success");
+    if (successMessage !== "") this.toast(successMessage || `${normalised.features.length} map features imported.`, "success");
   }
 
   async importSpatialData(form) {
@@ -1722,6 +1887,32 @@ class HideLineApp {
     if (!latRaw && !lngRaw) return null;
     if (!latRaw || !lngRaw) throw new Error(`Choose both latitude and longitude for ${label}.`);
     return this.deductionPoint(data, prefix, label);
+  }
+
+  questionFeatureReference(feature, seeker, { category = "unknown", boundaryOnly = false } = {}) {
+    if (!feature) return null;
+    const options = measurementOptionsForCategory(category, { boundaryOnly });
+    const nearest = seeker ? featureNearestPoint(seeker, feature, options) : null;
+    const anchor = featureAnchorPoint(feature);
+    const referencePoint = nearest?.point || anchor || null;
+    return {
+      referenceFeatureId: feature.id,
+      referenceFeatureName: feature.name,
+      referenceCategory: category,
+      referencePoint,
+      referenceGeometry: compactGeometry(feature.geometry, 220),
+      referenceSource: feature.source || "game map",
+      seekerDistanceMetres: Number.isFinite(nearest?.distanceMetres) ? nearest.distanceMetres : null,
+      measurementMethod: options.method
+    };
+  }
+
+  resolveQuestionReference(features, seeker, data, { category, boundaryOnly = false, region = false } = {}) {
+    const selectedId = String(data.deductionReferenceFeatureId || "").trim();
+    let feature = selectedId ? features.find((item) => item.id === selectedId) : null;
+    if (!feature && region) feature = containingFeature(seeker, features);
+    if (!feature && !region) feature = nearestFeature(seeker, features, measurementOptionsForCategory(category, { boundaryOnly }))?.feature || null;
+    return feature ? this.questionFeatureReference(feature, seeker, { category, boundaryOnly }) : null;
   }
 
   async addDeductionConstraint(form, data) {
@@ -1864,6 +2055,7 @@ class HideLineApp {
     this.updateCoordinateSummary(form, prefix);
     lat.dispatchEvent(new Event("input", { bubbles: true }));
     lng.dispatchEvent(new Event("input", { bubbles: true }));
+    this.captureModalDraft();
   }
 
   updateCoordinateSummary(form, prefix) {
@@ -1992,7 +2184,9 @@ class HideLineApp {
       const lat = Number(context.point.lat).toFixed(6);
       const lng = Number(context.point.lng).toFixed(6);
       pinInput.value = `https://www.google.com/maps?q=${lat},${lng}`;
+      pinInput.dispatchEvent(new Event("input", { bubbles: true }));
     }
+    this.captureModalDraft();
     this.closeCoordinatePicker();
     this.toast("Map coordinates added.", "success");
   }
@@ -2089,6 +2283,7 @@ class HideLineApp {
     const movementMode = data.deductionMovementMode === DEDUCTION_MOVEMENT.LOCKED || state.game?.phase === PHASES.ENDGAME
       ? DEDUCTION_MOVEMENT.LOCKED
       : DEDUCTION_MOVEMENT.MOBILE;
+    const spatialFeatures = this.combinedSpatialData(state).features;
 
     if (config.mode === "guided") {
       return {
@@ -2166,17 +2361,55 @@ class HideLineApp {
     const seeker = config.requiresSeekerPoint
       ? this.deductionPoint(data, "deductionSeeker", "the seeker pin")
       : null;
+    const categoryFeatures = config.category ? featuresForCategory(spatialFeatures, config.category) : [];
     if ([DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_MATCH, DEDUCTION_TOOL_TYPES.REGION_MATCH].includes(config.type)) {
-      return { enabled: true, type: config.type, movementMode, seeker, category: config.category };
+      const reference = categoryFeatures.length
+        ? this.resolveQuestionReference(categoryFeatures, seeker, data, { category: config.category, region: config.type === DEDUCTION_TOOL_TYPES.REGION_MATCH })
+        : null;
+      return {
+        enabled: true,
+        type: config.type,
+        movementMode,
+        seeker,
+        category: config.category,
+        ...(reference || {}),
+        referenceSummary: reference ? `${reference.referenceFeatureName} · ${reference.measurementMethod}` : null
+      };
     }
     if (config.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE) {
-      return { enabled: true, type: config.type, movementMode, seeker, category: config.category, boundaryOnly: Boolean(config.boundaryOnly) };
+      const boundaryOnly = Boolean(config.boundaryOnly) || ["water", "borough"].includes(config.category);
+      const reference = categoryFeatures.length
+        ? this.resolveQuestionReference(categoryFeatures, seeker, data, { category: config.category, boundaryOnly })
+        : null;
+      return {
+        enabled: true,
+        type: config.type,
+        movementMode,
+        seeker,
+        category: config.category,
+        boundaryOnly,
+        ...(reference || {}),
+        referenceSummary: reference
+          ? `${reference.referenceFeatureName} · ${reference.measurementMethod} · ${Math.round(reference.seekerDistanceMetres || 0)} m from the seeker pin`
+          : null
+      };
     }
     if (config.type === DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE) {
       return { enabled: true, type: config.type, movementMode, seeker };
     }
     if (config.type === DEDUCTION_TOOL_TYPES.TENTACLE) {
-      return { enabled: true, type: config.type, movementMode, seeker, category: config.category, radiusMetres: 2000 };
+      if (!categoryFeatures.length) throw new Error(`Load the game-map ${config.dataLabel || config.category} before asking this Tentacle question so HideLine can create the answer list.`);
+      const measurementOptions = measurementOptionsForCategory(config.category);
+      const answerChoices = categoryFeatures
+        .map((feature) => {
+          const distance = featureDistanceMetres(seeker, feature, measurementOptions);
+          const point = featureAnchorPoint(feature) || featureNearestPoint(seeker, feature, measurementOptions)?.point || null;
+          return { id: feature.id, name: feature.name, distanceFromSeekerMetres: distance, point };
+        })
+        .filter((choice) => Number.isFinite(choice.distanceFromSeekerMetres) && choice.distanceFromSeekerMetres <= 2000)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      if (!answerChoices.length) throw new Error(`No mapped ${config.dataLabel || config.category} lie within 2 km of that seeker pin. Check the pin or map data.`);
+      return { enabled: true, type: config.type, movementMode, seeker, category: config.category, radiusMetres: 2000, answerChoices };
     }
     return {
       enabled: true,
@@ -2216,7 +2449,7 @@ class HideLineApp {
     const coords = await resolveStationCoordinates(station);
     this.store.patch("privateTeamState.stationCoords", coords);
     await this.savePrivateTeamState();
-    if (this.store.get().ui.view === VIEWS.MAP && this.store.get().ui.mapMode === "zone") updateZoneMap({ station: this.stationMapObject(), positions: this.mapPositions(), radiusMetres: 500 });
+    if (this.store.get().ui.view === VIEWS.MAP && this.store.get().ui.mapMode === "zone") updateZoneMap({ station: this.stationMapObject(), positions: this.mapPositions(), radiusMetres: 500, question: this.pendingQuestion(), spatialFeatures: this.combinedSpatialData().features });
     this.toast(`Coordinates resolved via ${coords.source}.`, "success");
   }
 
@@ -2228,6 +2461,10 @@ class HideLineApp {
     game.usedStations = [...set];
     this.store.patch("game.usedStations", game.usedStations);
     await this.patchGameRemote({ usedStations: game.usedStations });
+  }
+
+  pendingQuestion() {
+    return this.store.get().questions.find((question) => question.status === "pending") || null;
   }
 
   stationMapObject() {

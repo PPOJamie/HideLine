@@ -13,7 +13,7 @@ import {
   isMaskConstraint,
   normaliseDeductionRoundState
 } from "../core/deduction.js";
-import { normaliseSpatialData, spatialCategoryLabel, spatialDataStats } from "../core/spatial.js";
+import { mergeSpatialData, normaliseSpatialData, spatialCategoryLabel, spatialDataStats } from "../core/spatial.js";
 import { STATION_GEO_BY_ID } from "../data/station-geo.js";
 import { STATIONS, STATION_BY_ID, stationNameLength } from "../data/stations.js";
 import { icon } from "./icons.js";
@@ -30,7 +30,8 @@ export function buildDeductionViewModel(state) {
     roundState.showZones = true;
   }
 
-  const spatialData = normaliseSpatialData(state.privateTeamState?.spatialData);
+  const importedSpatialData = normaliseSpatialData(state.privateTeamState?.spatialData);
+  const spatialData = mergeSpatialData(importedSpatialData, state.referenceData);
   const allAutomatic = deriveAutomaticConstraints({
     questions: state.questions,
     team: state.profile.team,
@@ -80,6 +81,8 @@ export function buildDeductionViewModel(state) {
     round,
     roundState,
     spatialData,
+    importedSpatialData,
+    referenceData: state.referenceData || { status: "idle", features: [], sources: [] },
     spatialStats: spatialDataStats(spatialData),
     allAutomatic,
     automatic,
@@ -224,11 +227,18 @@ function renderAnswerLog(model) {
 
 function renderMapSetup(model) {
   const stats = model.spatialStats;
+  const importedCount = model.importedSpatialData?.features?.length || 0;
+  const reference = model.referenceData || {};
+  const adminCount = reference.features?.length || 0;
+  const boundaryCount = model.spatialData.features.filter((feature) => feature.category === "game_boundary").length;
   return `<details class="card card-pad simple-expander map-setup">
-    <summary><span>${icon("settings")}<span><strong>Map setup and reset</strong><small>${stats.total ? `${stats.total} imported map features` : "Only needed for POIs, boundaries and Tentacles"}</small></span></span>${icon("chevron")}</summary>
+    <summary><span>${icon("settings")}<span><strong>Map data and reset</strong><small>${stats.total} usable features · ${adminCount} official boundaries</small></span></span>${icon("chevron")}</summary>
     <div class="simple-expander-body stack">
-      <div class="callout">${icon("info")}<p>Radar, Thermometer, station names, transit lines and Thames-side questions work immediately. Tentacles and POI/boundary questions need the Google My Maps KML/KMZ imported once.</p></div>
-      <form class="stack" data-form="spatial-data-import"><div class="field"><label for="spatial-data-file">Game map KML, KMZ or GeoJSON</label><input id="spatial-data-file" name="spatialDataFile" type="file" accept=".kml,.kmz,.geojson,.json,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" required /></div><div class="row wrap"><button class="button button-primary button-small" type="submit">${icon("uploadCloud")} Import map data</button><button class="button button-soft button-small" type="button" data-action="spatial-data-load-configured">${icon("download")} Try public map</button>${stats.total ? `<button class="button button-soft button-small" type="button" data-action="spatial-data-clear">Clear imported data</button>` : ""}</div></form>
+      <div class="map-data-status-grid"><div><span>Official administration layers</span><strong>${reference.status === "loading" ? "Loading…" : adminCount ? `${adminCount} ready` : "Unavailable"}</strong><small>London boroughs, electoral wards and parliamentary constituencies load automatically.</small></div><div><span>Game map</span><strong>${importedCount ? `${importedCount} features` : "Not imported"}</strong><small>${boundaryCount ? "Official red game boundary is active." : "The app will try to load the supplied map automatically. Import its KML/KMZ if Google blocks the download; this activates the exact red boundary and curated POIs."}</small></div></div>
+      ${reference.error ? `<div class="callout warning">${icon("alert")}<p>${escapeHtml(reference.error)}</p></div>` : ""}
+      <div class="row wrap"><button class="button button-soft button-small" type="button" data-action="reference-data-refresh">${icon("refresh")} Refresh official boundaries</button></div>
+      <form class="stack" data-form="spatial-data-import"><div class="field"><label for="spatial-data-file">Game map KML, KMZ or GeoJSON</label><input id="spatial-data-file" name="spatialDataFile" type="file" accept=".kml,.kmz,.geojson,.json,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" required /></div><div class="row wrap"><button class="button button-primary button-small" type="submit">${icon("uploadCloud")} Import game map</button><button class="button button-soft button-small" type="button" data-action="spatial-data-load-configured">${icon("download")} Load official game map</button>${importedCount ? `<button class="button button-soft button-small" type="button" data-action="spatial-data-clear">Clear imported game map</button>` : ""}</div></form>
+      <div class="callout">${icon("info")}<p>The built-in official boundaries remove the need to find borough, ward or constituency layers manually. Curated parks, museums, hospitals, cinemas, libraries, zoos, consulates and bodies of water still come from the supplied Google My Map.</p></div>
       <div class="divider"></div><button class="button button-danger button-small" type="button" data-action="deduction-reset">${icon("refresh")} Reset this round's deductions</button>
     </div>
   </details>`;

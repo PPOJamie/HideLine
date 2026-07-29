@@ -5,8 +5,9 @@ import { CARD_TYPES } from "../data/rules.js";
 import { STATIONS, STATION_BY_ID } from "../data/stations.js";
 import { RAIL_LINES } from "../data/station-geo.js";
 import { questionDeductionConfig } from "../data/question-deduction.js";
-import { spatialCategoryLabel } from "../core/spatial.js";
+import { featuresForCategory, mergeSpatialData, spatialCategoryLabel } from "../core/spatial.js";
 import { icon } from "./icons.js";
+import { renderQuestionLocations } from "./question-location.js";
 
 function frame(title, subtitle, body, actions = "") {
   return `
@@ -33,6 +34,7 @@ export function renderModal(name, state, context = {}) {
     case "ask-question": return askQuestionModal(state, context.questionId);
     case "custom-answer": return customAnswerModal(state, context.questionInstanceId);
     case "photo-answer": return photoAnswerModal(state, context.questionInstanceId);
+    case "answer-details": return answerDetailsModal(state, context.questionInstanceId);
     case "evidence-loading": return evidenceLoadingModal(context);
     case "evidence-preview": return evidencePreviewModal(context);
     case "mark-found": return markFoundModal(state);
@@ -118,13 +120,13 @@ function settingsModal(state) {
 function startRoundModal(state) {
   const game = state.game;
   const now = new Date();
-  now.setSeconds(0, 0);
-  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-  return frame(`Start round ${game?.round || 1}`, "Choose the hiding team and start time. The default release is 45 minutes later.", `
+  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
+  return frame(`Start round ${game?.round || 1}`, "Choose the hiding team. Start now uses the exact second when you press the button.", `
     <form class="stack" data-form="start-round">
       <div class="field"><label for="hider-team">Hiding team</label><select id="hider-team" name="hiderTeam"><option value="alpha" ${game?.hiderTeam === "alpha" ? "selected" : ""}>${escapeHtml(game?.teams?.alpha?.name || TEAM_LABELS.alpha)}</option><option value="bravo" ${game?.hiderTeam === "bravo" ? "selected" : ""}>${escapeHtml(game?.teams?.bravo?.name || TEAM_LABELS.bravo)}</option></select></div>
-      <div class="field"><label for="round-start">Round start</label><input id="round-start" name="roundStart" type="datetime-local" value="${localDate}" required /><span class="field-hint">Use now, or enter a mutually agreed start time.</span></div>
-      <details class="manual-coordinate-details"><summary>Change the standard timings</summary><div class="field-row"><div class="field"><label for="hide-minutes">Hiding period</label><input id="hide-minutes" name="hidingMinutes" type="number" min="1" value="45" /></div><div class="field"><label for="cutoff-minutes">Total round cutoff</label><input id="cutoff-minutes" name="cutoffMinutes" type="number" min="46" value="285" /></div></div></details>
+      <fieldset class="field"><legend class="field-label">When should the timer begin?</legend><label class="checkbox-row"><input type="radio" name="startMode" value="now" checked /><span><strong>Start now</strong><br><span class="field-hint">Recommended. The timer begins at the exact moment you submit.</span></span></label><label class="checkbox-row"><input type="radio" name="startMode" value="scheduled" /><span><strong>Use an agreed start time</strong><br><span class="field-hint">Use this only when both teams agreed a specific clock time.</span></span></label></fieldset>
+      <div class="field"><label for="round-start">Agreed start time</label><input id="round-start" name="roundStart" type="datetime-local" step="1" value="${localDate}" /><span class="field-hint">This is ignored while “Start now” is selected.</span></div>
+      <details class="manual-coordinate-details"><summary>Change the standard timings</summary><div class="field-row"><div class="field"><label for="hide-minutes">Hiding period</label><input id="hide-minutes" name="hidingMinutes" type="number" min="1" step="0.1" value="45" /></div><div class="field"><label for="cutoff-minutes">Total round cutoff</label><input id="cutoff-minutes" name="cutoffMinutes" type="number" min="1.1" step="0.1" value="285" /></div></div></details>
       <div class="callout warning">${icon("alert")}<p>At release, hiders must be inside a valid 500 m station-centred zone.</p></div>
       <button class="button button-primary" type="submit">${icon("play")} Start round</button>
     </form>
@@ -228,6 +230,23 @@ function deductionMovementInput(state) {
   return `<input type="hidden" name="deductionMovementMode" value="${mode}" />`;
 }
 
+function questionSpatialData(state) {
+  return mergeSpatialData(state.privateTeamState?.spatialData, state.referenceData);
+}
+
+const REFERENCE_SELECT_CATEGORIES = new Set(["park", "zoo", "museum", "cinema", "hospital", "library", "consulate", "aquarium", "water", "high_speed_rail", "borough"]);
+
+function featureReferenceSelect(features, config, question) {
+  if (!config.category || !REFERENCE_SELECT_CATEGORIES.has(config.category)) return "";
+  if (!["nearest-feature-match", "nearest-feature-distance"].includes(config.type)) return "";
+  const sorted = [...features].sort((a, b) => a.name.localeCompare(b.name));
+  if (!sorted.length) return "";
+  const label = config.type === "nearest-feature-match"
+    ? `Seeker's nearest ${spatialCategoryLabel(config.category).toLowerCase()}`
+    : `Reference used for the seeker's ${question.name.toLowerCase()} measurement`;
+  return `<div class="field reference-feature-field"><label for="deduction-reference-feature">${escapeHtml(label)}</label><select id="deduction-reference-feature" name="deductionReferenceFeatureId" data-reference-category="${escapeHtml(config.category)}"><option value="">Choose automatically from the seeker pin</option>${sorted.map((feature) => `<option value="${escapeHtml(feature.id)}">${escapeHtml(feature.name)}</option>`).join("")}</select><span class="field-hint">HideLine automatically selects the nearest valid map feature when this is left blank. Choose one to resolve an ambiguous pin or confirm the exact handbook layer item.</span></div>`;
+}
+
 function deductionLineOptions() {
   const groups = new Map();
   for (const line of RAIL_LINES) {
@@ -240,8 +259,9 @@ function deductionLineOptions() {
 function questionDeductionFields(state, question) {
   const current = state.location?.current || null;
   const config = questionDeductionConfig(question);
-  const importedFeatures = state.privateTeamState?.spatialData?.features || [];
-  const categoryCount = config.category ? importedFeatures.filter((feature) => feature.category === config.category).length : 0;
+  const spatialData = questionSpatialData(state);
+  const categoryFeatures = config.category ? featuresForCategory(spatialData.features, config.category) : [];
+  const categoryCount = categoryFeatures.length;
   const hidden = `<input type="hidden" name="deductionEnabled" value="on" />${deductionMovementInput(state)}`;
   let fields = "";
 
@@ -263,8 +283,13 @@ function questionDeductionFields(state, question) {
     fields = deductionCoordinateFields("deductionSeeker", "Seeker pin used for this question", current);
   }
 
+  fields += featureReferenceSelect(categoryFeatures, config, question);
+  if (config.type === "tentacle" && categoryCount) {
+    fields += `<div class="callout success">${icon("check")}<p>HideLine will build the hider's answer drop-down from the ${categoryCount} mapped ${escapeHtml(spatialCategoryLabel(config.category).toLowerCase())} and keep only those within 2 km of the seeker pin.</p></div>`;
+  }
+
   const dataNote = config.category && !categoryCount
-    ? `<div class="callout warning">${icon("info")}<p>This answer will be saved now. ${escapeHtml(config.dataLabel || spatialCategoryLabel(config.category))} map data is needed before it can shade the map.</p></div>`
+    ? `<div class="callout warning map-data-question-warning">${icon("info")}<div><p>This question needs ${escapeHtml(config.dataLabel || spatialCategoryLabel(config.category))}. Borough, ward and constituency polygons load from HideLine's built-in official sources; curated POIs come from the supplied game map.</p><button class="button button-soft button-small" type="button" data-action="spatial-data-load-configured">${icon("download")} Load official game map</button></div></div>`
     : config.category
       ? `<p class="tiny muted">${categoryCount} matching map features are ready.</p>`
       : "";
@@ -301,6 +326,34 @@ function askQuestionModal(state, questionId) {
       <label class="checkbox-row"><input type="checkbox" name="confirmed" required /><span>I have shared any required pin or transit notice, and no other question is waiting.</span></label>
       <button class="button button-primary button-large" type="submit">${icon("clock")} Ask and start timer</button>
     </form>
+  `);
+}
+
+function renderAnswerMapReference(record) {
+  const reference = record?.mapReference;
+  if (!reference?.name) return "";
+  const distance = Number(reference.seekerDistanceMetres);
+  return `<section class="question-reference-card"><div class="question-reference-icon">${icon("measure")}</div><div><span>Map reference used</span><strong>${escapeHtml(reference.name)}</strong><p>${escapeHtml([reference.method, Number.isFinite(distance) ? `${Math.round(distance)} m from the seeker pin` : ""].filter(Boolean).join(" · "))}</p>${reference.explanation ? `<p class="measurement-explanation">${escapeHtml(reference.explanation)}</p>` : ""}<small>${escapeHtml(reference.source || "Game map")}</small></div></section>`;
+}
+
+function answerDetailsModal(state, instanceId) {
+  const record = state.questions.find((question) => question.id === instanceId);
+  if (!record) return frame("Answer not found", "", `<p class="muted">This answer is no longer available on this device.</p>`);
+  const definition = QUESTION_BY_ID.get(record.questionId) || record;
+  const hasEvidence = Boolean(record.evidencePath || record.evidenceKey || record.evidenceDataUrl);
+  const answeredAt = record.answeredAt ? formatDateTime(record.answeredAt) : "Not recorded";
+  const reward = record.reward || definition.reward || { draw: 0, keep: 0 };
+  return frame("Answer details", escapeHtml(record.questionName || definition.name || "Question"), `
+    <article class="answer-details-card">
+      <div class="answer-details-result"><span>Answer</span><strong>${escapeHtml(record.answer || "No answer recorded")}</strong></div>
+      <div class="answer-details-question"><span>Question</span><p>${escapeHtml(record.prompt || definition.prompt || "")}</p></div>
+      ${renderQuestionLocations(record)}
+      ${renderAnswerMapReference(record)}
+      ${record.note ? `<div class="answer-details-note"><span>Question clarification</span><p>${escapeHtml(record.note)}</p></div>` : ""}
+      ${record.answerNote ? `<div class="answer-details-note"><span>Hider explanation</span><p>${escapeHtml(record.answerNote)}</p></div>` : ""}
+      <dl class="answer-details-meta"><div><dt>Asked</dt><dd>${escapeHtml(record.askedAt ? formatDateTime(record.askedAt) : "Not recorded")}</dd></div><div><dt>Answered</dt><dd>${escapeHtml(answeredAt)}</dd></div><div><dt>Reward</dt><dd>${record.rewardEarned === false ? "No reward — answered after deadline" : `Draw ${Number(reward.draw) || 0}, keep ${Number(reward.keep) || 0}`}</dd></div><div><dt>Phase</dt><dd>${escapeHtml(record.answeredPhase || record.phase || "Unknown")}</dd></div></dl>
+      <div class="row wrap">${hasEvidence ? `<button class="button button-primary" type="button" data-action="view-evidence" data-question-instance="${escapeHtml(record.id)}">${icon("camera")} Open photo answer</button>` : ""}<button class="button button-soft" type="button" data-action="close-modal">Close</button></div>
+    </article>
   `);
 }
 

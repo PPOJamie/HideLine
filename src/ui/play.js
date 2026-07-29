@@ -163,7 +163,14 @@ function renderRecentActivity(state, now) {
     <div class="section-head"><div><h2>Recent activity</h2><p>Only the latest useful updates are shown.</p></div></div>
     ${events.length ? `<div class="simple-list">${events.map((event) => {
       const createdAt = event.createdAt || event.created_at || new Date().toISOString();
-      return `<div class="simple-list-row activity-row"><span class="activity-dot"></span><span><strong>${escapeHtml(eventText(event))}</strong><small>${relativeTime(createdAt, now)}</small></span></div>`;
+      const payload = event.payload || event;
+      const type = event.type || event.event_type;
+      const action = type === "answer" && payload.questionInstanceId
+        ? `<button class="button button-primary button-small" type="button" data-action="view-answer" data-question-instance="${escapeHtml(payload.questionInstanceId)}">${icon("eye")} View answer</button>`
+        : type === "question"
+          ? `<button class="button button-soft button-small" type="button" data-action="navigate" data-view="questions">Open questions</button>`
+          : "";
+      return `<div class="simple-list-row activity-row"><span class="activity-dot"></span><span><strong>${escapeHtml(eventText(event))}</strong><small>${relativeTime(createdAt, now)}</small></span>${action}</div>`;
     }).join("")}</div>` : `<p class="muted">Nothing has happened yet.</p>`}
     <form class="chat-form compact-chat" data-form="chat"><label class="sr-only" for="chat-message">Team note</label><input id="chat-message" name="message" maxlength="300" placeholder="Add a short team note…" autocomplete="off" /><button class="button button-secondary" type="submit">Send</button></form>
   </section>`;

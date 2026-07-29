@@ -4,7 +4,7 @@ import { randomId, roomCode } from "./format.js";
 
 export function createDefaultState() {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     profile: {
       id: localStorage.getItem("hideline:device-id") || randomId("device"),
       name: "Player",
@@ -48,6 +48,7 @@ export function createDefaultState() {
     positions: [],
     location: { sharing: false, shareWith: "team", current: null, error: null },
     tfl: { status: "idle", updatedAt: null, lines: [], error: null },
+    referenceData: { status: "idle", updatedAt: null, sourceName: "Built-in official administrative boundaries", features: [], sources: [], errors: [], error: null },
     checklist: {},
     settings: {
       repeatRewardMode: "multiply-both",
@@ -142,6 +143,10 @@ export class Store extends EventTarget {
         this.state.settings ||= {};
         if (typeof this.state.settings.notificationsEnabled !== "boolean") this.state.settings.notificationsEnabled = false;
       }
+      if (previousSchema < 6) {
+        this.state.schemaVersion = 6;
+        this.state.referenceData = { status: "idle", updatedAt: null, sourceName: "Built-in official administrative boundaries", features: [], sources: [], errors: [], error: null };
+      }
     } catch {
       this.state = defaults;
     }
@@ -174,7 +179,13 @@ export class Store extends EventTarget {
   }
 
   persist() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state)); } catch (error) { console.warn("State could not be persisted", error); }
+    try {
+      // Official boundary polygons are cached by the Cache API. Keeping the
+      // full geometry out of localStorage prevents quota errors on phones.
+      const value = structuredClone(this.state);
+      if (value.referenceData) value.referenceData = { ...value.referenceData, status: "idle", features: [] };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+    } catch (error) { console.warn("State could not be persisted", error); }
   }
 
   reset() {

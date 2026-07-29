@@ -16,6 +16,26 @@ function renderAuthoritativeMap() {
   </section>`;
 }
 
+
+function renderZoneQuestionGuide(state) {
+  const record = (state.questions || [])
+    .filter((question) => question.status === "pending")
+    .sort((a, b) => String(a.askedAt || "").localeCompare(String(b.askedAt || "")))[0];
+  if (!record) return "";
+  const reference = record.mapReference;
+  if (!reference?.name && !(record.answerChoices || []).length) return "";
+  const distance = Number(reference?.seekerDistanceMetres);
+  const point = reference?.point;
+  const mapUrl = point?.lat != null && point?.lng != null
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${Number(point.lat).toFixed(6)},${Number(point.lng).toFixed(6)}`)}`
+    : "";
+  return `<section class="zone-question-guide">
+    <div><p class="eyebrow">Current map-assisted question</p><strong>${escapeHtml(record.questionName || "Question")}</strong>${reference?.name ? `<p><span class="zone-key zone-key-seeker"></span>Seeker reference: <strong>${escapeHtml(reference.name)}</strong>${Number.isFinite(distance) ? ` · ${Math.round(distance)} m` : ""}</p>` : ""}${reference?.explanation ? `<small>${escapeHtml(reference.explanation)}</small>` : ""}</div>
+    <div class="zone-question-guide-actions">${mapUrl ? `<a class="button button-soft button-small" href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener noreferrer">${icon("external")} Open reference</a>` : ""}</div>
+    <div class="zone-map-key"><span><i class="zone-key zone-key-seeker"></i>Orange: seeker reference</span><span><i class="zone-key zone-key-hider"></i>Teal: your nearest result when GPS is available</span></div>
+  </section>`;
+}
+
 function renderZoneCheck(state) {
   const secret = state.privateTeamState || {};
   const station = STATION_BY_ID.get(secret.stationId) || (secret.stationName ? { name: secret.stationName } : null);
@@ -26,6 +46,7 @@ function renderZoneCheck(state) {
   return `<div class="grid simple-zone-grid">
     <section class="card card-pad stack">
       <div class="section-head"><div><h2>My 500 m zone</h2><p>Your selected station stays private to your team.</p></div></div>
+      ${renderZoneQuestionGuide(state)}
       <div class="map-shell"><div id="zone-map" role="application" aria-label="Interactive hiding zone map"></div><div class="map-overlay"><div class="map-status"><strong>${station ? escapeHtml(station.name) : "Choose a station"}</strong><br>${coords ? "500 m circle ready" : "Save a station to draw its zone"}</div></div></div>
     </section>
     <aside class="card card-pad stack simple-zone-controls">
