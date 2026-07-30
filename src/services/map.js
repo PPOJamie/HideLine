@@ -14,7 +14,8 @@ import {
   featureNearestPoint,
   featuresForCategory,
   measurementOptionsForCategory,
-  nearestFeature
+  nearestFeature,
+  usableWaterFeatures
 } from "../core/spatial.js";
 
 let loadPromise;
@@ -28,6 +29,9 @@ let deductionViewportCache = null;
 let activeDeductionViewportKey = null;
 let coordinatePickerMapInstance;
 let coordinatePickerMarker;
+let coordinatePickerOriginMarker;
+let coordinatePickerGuideLine;
+let coordinatePickerOriginPoint;
 let coordinatePickerFallback = null;
 
 const STATUS_COLOURS = Object.freeze({
@@ -206,7 +210,8 @@ function drawHiderAnswerHelper(L, group, question, spatialFeatures = [], positio
   const input = question?.deductionInput || {};
   const own = positions.find((position) => position?.isOwn && Number.isFinite(Number(position.lat)) && Number.isFinite(Number(position.lng)));
   if (!own || !input.category) return;
-  const features = featuresForCategory(spatialFeatures, input.category);
+  const rawFeatures = featuresForCategory(spatialFeatures, input.category);
+  const features = input.category === "water" ? usableWaterFeatures(rawFeatures) : rawFeatures;
   if (!features.length) return;
   const point = { lat: Number(own.lat), lng: Number(own.lng) };
   let candidate = null;
@@ -316,25 +321,34 @@ function setFallbackPickerPoint(point, { notify = false } = {}) {
   coordinatePickerFallback.marker?.setAttribute("cy", projected.y.toFixed(1));
   coordinatePickerFallback.markerHalo?.setAttribute("cx", projected.x.toFixed(1));
   coordinatePickerFallback.markerHalo?.setAttribute("cy", projected.y.toFixed(1));
+  coordinatePickerFallback.guideLine?.setAttribute("x2", projected.x.toFixed(1));
+  coordinatePickerFallback.guideLine?.setAttribute("y2", projected.y.toFixed(1));
   if (notify) coordinatePickerFallback.onChange?.(parsed);
 }
 
-function renderCoordinatePickerFallback(container, initialPoint, onChange, message = "") {
+function renderCoordinatePickerFallback(container, initialPoint, onChange, message = "", originPoint = null) {
   const projection = VECTOR_MAP;
   const point = pickerPoint(initialPoint);
+  const origin = originPoint ? pickerPoint(originPoint) : null;
   const boundary = APPROXIMATE_GAME_BOUNDARY.map(([lng, lat]) => ({ lat, lng }));
   const stationDots = STATION_GEO.map((station) => {
     const projected = vectorPoint(station, projection);
     return `<circle cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="2.2" fill="#536273" fill-opacity=".62"><title>${escapeMapText(station.name)}</title></circle>`;
   }).join("");
   const projected = vectorPoint(point, projection);
-  container.innerHTML = `<div class="coordinate-picker-fallback"><svg viewBox="0 0 ${projection.width} ${projection.height}" preserveAspectRatio="xMidYMid meet" role="application" aria-label="Tap the London map to choose coordinates"><rect width="${projection.width}" height="${projection.height}" rx="18" fill="#edf4f7" /><polygon points="${vectorPoints(boundary, projection)}" fill="#f26a3d" fill-opacity=".035" stroke="#e9572e" stroke-width="2.5" stroke-dasharray="10 8" /><polyline points="${vectorPoints(THAMES_CENTRELINE, projection)}" fill="none" stroke="#8bc7e3" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".38" /><polyline points="${vectorPoints(THAMES_CENTRELINE, projection)}" fill="none" stroke="#2176ae" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity=".78" />${stationDots}<circle data-picker-halo cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="13" fill="#fff" fill-opacity=".88" stroke="#0b1f33" stroke-width="2" /><circle data-picker-marker cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="7" fill="#f26a3d" stroke="#0b1f33" stroke-width="3" /></svg><p>${escapeMapText(message || "Offline map active. Tap anywhere to place the pin.")}</p></div>`;
+  const projectedOrigin = origin ? vectorPoint(origin, projection) : null;
+  const originGuide = projectedOrigin
+    ? `<line data-picker-guide x1="${projectedOrigin.x.toFixed(1)}" y1="${projectedOrigin.y.toFixed(1)}" x2="${projected.x.toFixed(1)}" y2="${projected.y.toFixed(1)}" stroke="#ef7d00" stroke-width="3" stroke-dasharray="8 6" /><circle cx="${projectedOrigin.x.toFixed(1)}" cy="${projectedOrigin.y.toFixed(1)}" r="8" fill="#54b7e8" stroke="#0b4f75" stroke-width="3"><title>Selected player location</title></circle>`
+    : "";
+  container.innerHTML = `<div class="coordinate-picker-fallback"><svg viewBox="0 0 ${projection.width} ${projection.height}" preserveAspectRatio="xMidYMid meet" role="application" aria-label="Tap the London map to choose coordinates"><rect width="${projection.width}" height="${projection.height}" rx="18" fill="#edf4f7" /><polygon points="${vectorPoints(boundary, projection)}" fill="#f26a3d" fill-opacity=".035" stroke="#e9572e" stroke-width="2.5" stroke-dasharray="10 8" /><polyline points="${vectorPoints(THAMES_CENTRELINE, projection)}" fill="none" stroke="#8bc7e3" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".38" /><polyline points="${vectorPoints(THAMES_CENTRELINE, projection)}" fill="none" stroke="#2176ae" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity=".78" />${stationDots}${originGuide}<circle data-picker-halo cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="13" fill="#fff" fill-opacity=".88" stroke="#0b1f33" stroke-width="2" /><circle data-picker-marker cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="7" fill="#f26a3d" stroke="#0b1f33" stroke-width="3" /></svg><p>${escapeMapText(message || "Offline map active. Tap anywhere to place the pin.")}</p></div>`;
   const svg = container.querySelector("svg");
   coordinatePickerFallback = {
     container,
     svg,
     marker: container.querySelector("[data-picker-marker]"),
     markerHalo: container.querySelector("[data-picker-halo]"),
+    guideLine: container.querySelector("[data-picker-guide]"),
+    originPoint: origin,
     projection,
     point,
     onChange
@@ -359,6 +373,7 @@ function renderCoordinatePickerFallback(container, initialPoint, onChange, messa
 export async function renderCoordinatePickerMap({
   containerId = "coordinate-picker-map",
   initialPoint = LONDON_MAP_CENTRE,
+  originPoint = null,
   referenceFeatures = [],
   referenceLabel = "Mapped reference features",
   onChange
@@ -367,11 +382,16 @@ export async function renderCoordinatePickerMap({
   const container = document.getElementById(containerId);
   if (!container) return null;
   const point = pickerPoint(initialPoint);
+  const origin = originPoint ? pickerPoint(originPoint) : null;
+  coordinatePickerOriginPoint = origin;
   let L;
   try {
     L = await loadLeaflet();
   } catch (error) {
-    return renderCoordinatePickerFallback(container, point, onChange, error.message);
+    const message = origin
+      ? "Online map tiles are unavailable. The fallback shows only the Thames guide; for another water body, cancel and enter the exact edge coordinates manually."
+      : error.message;
+    return renderCoordinatePickerFallback(container, point, onChange, message, origin);
   }
   coordinatePickerMapInstance = L.map(container, { zoomControl: true, attributionControl: true }).setView([point.lat, point.lng], 15);
   addBaseMap(L, coordinatePickerMapInstance);
@@ -395,11 +415,31 @@ export async function renderCoordinatePickerMap({
   // The OpenStreetMap basemap already contains the actual Thames banks. Do
   // not add a second approximate river line here: it can visually spill onto
   // land when zoomed in and is unnecessary for choosing a coordinate.
+  if (origin) {
+    coordinatePickerOriginMarker = L.circleMarker([origin.lat, origin.lng], {
+      radius: 8,
+      color: "#0b4f75",
+      fillColor: "#54b7e8",
+      fillOpacity: 1,
+      weight: 3,
+      interactive: false
+    }).bindTooltip("Selected player location", { permanent: false, direction: "top" }).addTo(coordinatePickerMapInstance);
+    coordinatePickerGuideLine = L.polyline([[origin.lat, origin.lng], [point.lat, point.lng]], {
+      color: "#ef7d00",
+      weight: 3,
+      opacity: 0.9,
+      dashArray: "7 6",
+      interactive: false
+    }).addTo(coordinatePickerMapInstance);
+  }
   coordinatePickerMarker = L.marker([point.lat, point.lng], { draggable: true, autoPan: true }).addTo(coordinatePickerMapInstance);
-  coordinatePickerMarker.bindTooltip("Drag or tap the map to move this pin", { permanent: false, direction: "top" });
+  coordinatePickerMarker.bindTooltip(origin ? "Water edge — drag or tap to move" : "Drag or tap the map to move this pin", { permanent: false, direction: "top" });
   const report = (latlng) => {
     const selected = { lat: Number(latlng.lat), lng: Number(latlng.lng) };
     coordinatePickerMarker?.setLatLng([selected.lat, selected.lng]);
+    if (coordinatePickerGuideLine && coordinatePickerOriginPoint) {
+      coordinatePickerGuideLine.setLatLngs([[coordinatePickerOriginPoint.lat, coordinatePickerOriginPoint.lng], [selected.lat, selected.lng]]);
+    }
     onChange?.(selected);
   };
   coordinatePickerMapInstance.on("click", (event) => report(event.latlng));
@@ -412,6 +452,9 @@ export function updateCoordinatePickerPoint(point, { pan = true } = {}) {
   const parsed = pickerPoint(point);
   if (coordinatePickerMapInstance && coordinatePickerMarker) {
     coordinatePickerMarker.setLatLng([parsed.lat, parsed.lng]);
+    if (coordinatePickerGuideLine && coordinatePickerOriginPoint) {
+      coordinatePickerGuideLine.setLatLngs([[coordinatePickerOriginPoint.lat, coordinatePickerOriginPoint.lng], [parsed.lat, parsed.lng]]);
+    }
     if (pan) coordinatePickerMapInstance.setView([parsed.lat, parsed.lng], Math.max(15, coordinatePickerMapInstance.getZoom()), { animate: false });
   }
   setFallbackPickerPoint(parsed);
@@ -421,6 +464,9 @@ export function destroyCoordinatePickerMap() {
   coordinatePickerMapInstance?.remove();
   coordinatePickerMapInstance = null;
   coordinatePickerMarker = null;
+  coordinatePickerOriginMarker = null;
+  coordinatePickerGuideLine = null;
+  coordinatePickerOriginPoint = null;
   if (coordinatePickerFallback?.container) coordinatePickerFallback.container.innerHTML = "";
   coordinatePickerFallback = null;
 }

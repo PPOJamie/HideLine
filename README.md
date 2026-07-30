@@ -1,16 +1,22 @@
 # HideLine — London Hide + Seek Companion
 
-HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.3.1 adds a direct body-of-water shoreline picker and replaces the failing administrative-boundary requests with fixed official ONS FeatureServer layers, validated response handling and a cached ArcGIS JSON fallback.
+HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.3.2 completely replaces the confusing Body of Water place-name dropdown with a map-only, two-point distance calculator for both teams.
 
 ![Simple HideLine game screen](assets/screenshot-simple-desktop.png)
 
 ![Simple HideLine deduction map on mobile](assets/screenshot-simple-mobile.png)
 
-## What is new in 2.3.1
+## What is new in 2.3.2
 
-- **Pick a water edge from the map:** Body of Water Measuring now opens a dedicated map. Choose the seeker pin, then tap a named water polygon or the correct shoreline. HideLine records the exact point and automatically calculates the seeker-to-edge distance.
-- **Incomplete water lists no longer block play:** the existing mapped-water dropdown remains available, but a missing canal, dock, lake or basin can be named and selected manually from the basemap. The exact reference is shown on the question and hider map.
-- **Safer deductions from manual water points:** a manually selected shoreline is retained as a visible, auditable clue. HideLine does not pretend that an incomplete water dataset can safely eliminate the rest of London automatically.
+- **No Body of Water dropdown:** station names and incomplete water placemarks can no longer be chosen accidentally. The question does not depend on a list of water names.
+- **Seeker two-point measurement:** choose the seeker location, open **Select nearest water edge on map**, and tap the exact nearest bank or shoreline of the nearest valid named blue water area. HideLine draws the measurement line and calculates the baseline distance.
+- **Private hider calculator:** the hider opens **Calculate and answer**, chooses their current position and their own nearest valid water edge, and receives the calculated **Closer** or **Further** answer. The hider's two coordinates are not added to the shared game record.
+- **Map key and audit trail:** the picker distinguishes the player position, selected edge and measured line. The shared question retains the seeker pin, exact edge point, Google Maps links and baseline distance. Exact edge coordinates can also be entered manually when map tiles are unavailable.
+- **Safer water data:** point placemarks, station pins, swimming pools and fountains are ignored by automatic water deductions. In particular, a station such as Canada Water cannot be treated as a body of water.
+- **Legacy protection:** a pending Body of Water question made with the old list is labelled for re-asking rather than reusing a potentially incorrect reference.
+
+## What changed in 2.3.1
+
 - **Boundary requests repaired:** boroughs, wards and constituencies use fixed ONS `FeatureServer/0/query` layers and simple spatial queries rather than the retired HTML/MapServer routes that produced the reported errors.
 - **Two-format boundary fallback:** each layer first requests GeoJSON and automatically retries as ArcGIS JSON when a service or browser rejects GeoJSON. Valid Central London polygons are cached after the first successful load.
 - **Per-layer status:** the Map Data panel shows separate Ready/Unavailable states for London boroughs, electoral wards and parliamentary constituencies, with one control to clear an invalid cache and retry.
@@ -121,7 +127,7 @@ window.HIDELINE_CONFIG = {
 };
 ```
 
-HideLine 2.3.1 requires **no new Supabase migration**. Water-reference and administrative-boundary fixes are client-side, as were the 2.3.0 timer, form-draft, answer-view and POI changes. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
+HideLine 2.3.2 requires **no new Supabase migration**. The map-only Body of Water workflow, water-feature filtering and administrative-boundary fixes are client-side, as were the 2.3.0 timer, form-draft, answer-view and POI changes. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
 
 ## Privacy model
 

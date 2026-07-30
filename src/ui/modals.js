@@ -5,7 +5,7 @@ import { CARD_TYPES } from "../data/rules.js";
 import { STATIONS, STATION_BY_ID } from "../data/stations.js";
 import { RAIL_LINES } from "../data/station-geo.js";
 import { questionDeductionConfig } from "../data/question-deduction.js";
-import { featuresForCategory, mergeSpatialData, spatialCategoryLabel } from "../core/spatial.js";
+import { featuresForCategory, mergeSpatialData, spatialCategoryLabel, usableWaterFeatures } from "../core/spatial.js";
 import { icon } from "./icons.js";
 import { renderQuestionLocations } from "./question-location.js";
 
@@ -33,6 +33,7 @@ export function renderModal(name, state, context = {}) {
     case "add-trap": return addTrapModal(state);
     case "ask-question": return askQuestionModal(state, context.questionId);
     case "custom-answer": return customAnswerModal(state, context.questionInstanceId);
+    case "water-answer": return waterAnswerModal(state, context.questionInstanceId);
     case "photo-answer": return photoAnswerModal(state, context.questionInstanceId);
     case "answer-details": return answerDetailsModal(state, context.questionInstanceId);
     case "evidence-loading": return evidenceLoadingModal(context);
@@ -234,7 +235,7 @@ function questionSpatialData(state) {
   return mergeSpatialData(state.privateTeamState?.spatialData, state.referenceData);
 }
 
-const REFERENCE_SELECT_CATEGORIES = new Set(["park", "zoo", "museum", "cinema", "hospital", "library", "consulate", "aquarium", "water", "high_speed_rail", "borough"]);
+const REFERENCE_SELECT_CATEGORIES = new Set(["park", "zoo", "museum", "cinema", "hospital", "library", "consulate", "aquarium", "high_speed_rail", "borough"]);
 
 function featureReferenceSelect(features, config, question) {
   if (!config.category || !REFERENCE_SELECT_CATEGORIES.has(config.category)) return "";
@@ -247,22 +248,22 @@ function featureReferenceSelect(features, config, question) {
   return `<div class="field reference-feature-field"><label for="deduction-reference-feature">${escapeHtml(label)}</label><select id="deduction-reference-feature" name="deductionReferenceFeatureId" data-reference-category="${escapeHtml(config.category)}"><option value="">Choose automatically from the seeker pin</option>${sorted.map((feature) => `<option value="${escapeHtml(feature.id)}">${escapeHtml(feature.name)}</option>`).join("")}</select><span class="field-hint">HideLine automatically selects the nearest valid map feature when this is left blank. Choose one to resolve an ambiguous pin or confirm the exact handbook layer item.</span></div>`;
 }
 
-function waterReferenceFields(features) {
-  const sorted = [...features].sort((a, b) => a.name.localeCompare(b.name));
-  const options = sorted.map((feature) => `<option value="${escapeHtml(feature.id)}">${escapeHtml(feature.name)}</option>`).join("");
-  return `<section class="water-reference-picker" data-water-reference-picker>
-    <div class="water-reference-heading"><span class="water-reference-icon">${icon("measure")}</span><div><strong>Choose the nearest named body of water</strong><p>Select a mapped water body, or tap the correct shoreline on the map when the list is incomplete. HideLine calculates the seeker's distance automatically.</p></div></div>
-    ${sorted.length ? `<div class="field reference-feature-field"><label for="deduction-reference-feature">Mapped body of water</label><select id="deduction-reference-feature" name="deductionReferenceFeatureId" data-action="water-reference-feature" data-reference-category="water"><option value="">Choose automatically from the seeker pin</option>${options}</select><span class="field-hint">Selecting a water body snaps the orange reference point to the closest edge of that water body from the seeker pin.</span></div>` : `<div class="callout warning">${icon("info")}<p>No named water polygons are loaded. You can still select the shoreline manually and name it below; HideLine will show the exact distance but will not make unsafe automatic eliminations from an incomplete water layer.</p></div>`}
-    <div class="field"><label for="deduction-water-name">Water name shown to the hiders</label><input id="deduction-water-name" name="deductionWaterName" maxlength="120" placeholder="e.g. The Serpentine, Regent's Canal, West India Dock" data-action="water-reference-name" /><span class="field-hint">Required for a manually selected shoreline. A mapped selection fills this automatically.</span></div>
-    <input type="hidden" name="deductionWaterPointLat" value="" />
-    <input type="hidden" name="deductionWaterPointLng" value="" />
-    <div class="water-reference-actions"><button class="button button-primary" type="button" data-action="coordinate-picker-open" data-prefix="deductionWaterPoint" data-label="Nearest point on the named body of water" data-picker-mode="water-edge" data-seeker-prefix="deductionSeeker">${icon("map")} Pick nearest water edge from map</button></div>
+function waterReferenceFields() {
+  return `<section class="water-reference-picker" data-water-calculator data-location-prefix="deductionSeeker" data-edge-prefix="deductionWaterPoint" data-name-field="deductionWaterName">
+    <div class="water-reference-heading"><span class="water-reference-icon">${icon("measure")}</span><div><strong>Set the seeker’s Body of Water distance</strong><p>There is no place-name list. Pick the exact nearest edge of the nearest valid named blue water area directly from the map.</p></div></div>
+    <ol class="water-question-steps">
+      <li><strong>Choose the seeker pin above.</strong><span>This is where the seekers are when the question is asked.</span></li>
+      <li><strong>Tap the nearest water edge.</strong><span>Use the visible basemap. Do not use a swimming pool or fountain.</span></li>
+    </ol>
+    <div class="field"><label for="deduction-water-name">Water name <span class="field-optional">optional</span></label><input id="deduction-water-name" name="deductionWaterName" maxlength="120" placeholder="For audit only, e.g. Regent’s Canal" data-action="water-reference-name" /><span class="field-hint">The name is not used in the calculation. The exact edge coordinate and measured distance are.</span></div>
+    <details class="manual-coordinate-details"><summary>Enter exact water-edge coordinates manually</summary><div class="field-row"><div class="field"><label for="deduction-water-point-lat">Edge latitude</label><input id="deduction-water-point-lat" name="deductionWaterPointLat" type="number" inputmode="decimal" step="any" min="-90" max="90" /></div><div class="field"><label for="deduction-water-point-lng">Edge longitude</label><input id="deduction-water-point-lng" name="deductionWaterPointLng" type="number" inputmode="decimal" step="any" min="-180" max="180" /></div></div></details>
+    <div class="water-reference-actions"><button class="button button-primary" type="button" data-action="coordinate-picker-open" data-prefix="deductionWaterPoint" data-label="Select the seeker’s nearest valid water edge" data-picker-mode="water-edge" data-seeker-prefix="deductionSeeker">${icon("map")} Select nearest water edge on map</button></div>
     <div class="coordinate-selection-summary water-reference-summary" data-coordinate-summary="deductionWaterPoint" data-water-reference-summary>
-      ${icon("location")}<span>No shoreline point selected yet</span>
+      ${icon("location")}<span>No water-edge point selected yet</span>
       <a class="coordinate-preview-link" data-coordinate-preview="deductionWaterPoint" target="_blank" rel="noopener noreferrer" hidden>Open in Google Maps ${icon("external")}</a>
-      <small data-water-reference-distance>Choose the seeker pin first, then select a water body or shoreline.</small>
+      <small data-water-reference-distance>Choose the seeker pin first, then tap the nearest valid water edge.</small>
     </div>
-    <div class="callout water-rule-note">${icon("info")}<p><strong>Handbook method:</strong> measure to the nearest edge of a named blue-shaded body of water, excluding swimming pools and fountains. The hiders compare this with their own nearest valid water edge.</p></div>
+    <div class="callout water-rule-note">${icon("info")}<p><strong>What counts:</strong> a named area shaded blue on the normal map. Measure to its nearest edge. Swimming pools and fountains do not count. The hider will repeat the same two-point process privately for their own location.</p></div>
   </section>`;
 }
 
@@ -280,7 +281,8 @@ function questionDeductionFields(state, question) {
   const config = questionDeductionConfig(question);
   const spatialData = questionSpatialData(state);
   const categoryFeatures = config.category ? featuresForCategory(spatialData.features, config.category) : [];
-  const categoryCount = categoryFeatures.length;
+  const usableCategoryFeatures = config.category === "water" ? usableWaterFeatures(categoryFeatures) : categoryFeatures;
+  const categoryCount = usableCategoryFeatures.length;
   const hidden = `<input type="hidden" name="deductionEnabled" value="on" />${deductionMovementInput(state)}`;
   let fields = "";
 
@@ -303,17 +305,21 @@ function questionDeductionFields(state, question) {
   }
 
   fields += question.id === "measuring-water"
-    ? waterReferenceFields(categoryFeatures)
+    ? waterReferenceFields()
     : featureReferenceSelect(categoryFeatures, config, question);
   if (config.type === "tentacle" && categoryCount) {
     fields += `<div class="callout success">${icon("check")}<p>HideLine will build the hider's answer drop-down from the ${categoryCount} mapped ${escapeHtml(spatialCategoryLabel(config.category).toLowerCase())} and keep only those within 2 km of the seeker pin.</p></div>`;
   }
 
-  const dataNote = config.category && !categoryCount && question.id !== "measuring-water"
-    ? `<div class="callout warning map-data-question-warning">${icon("info")}<div><p>This question needs ${escapeHtml(config.dataLabel || spatialCategoryLabel(config.category))}. Borough, ward and constituency polygons load from HideLine's built-in official sources; curated POIs come from the supplied game map.</p><button class="button button-soft button-small" type="button" data-action="spatial-data-load-configured">${icon("download")} Load official game map</button></div></div>`
-    : config.category
-      ? `<p class="tiny muted">${categoryCount} matching map features are ready.</p>`
-      : "";
+  const dataNote = question.id === "measuring-water"
+    ? categoryCount
+      ? `<p class="tiny muted">${categoryCount} usable water-edge shapes are available for optional Find Hiders shading. The question itself is calculated from the two exact map points selected by the teams.</p>`
+      : `<div class="callout warning map-data-question-warning">${icon("info")}<p>The question still works from the exact seeker and hider water-edge points. Find Hiders shading will remain unresolved until a real water line or polygon is available; HideLine will not guess from place-name pins.</p></div>`
+    : config.category && !categoryCount
+      ? `<div class="callout warning map-data-question-warning">${icon("info")}<div><p>This question needs ${escapeHtml(config.dataLabel || spatialCategoryLabel(config.category))}. Borough, ward and constituency polygons load from HideLine's built-in official sources; curated POIs come from the supplied game map.</p><button class="button button-soft button-small" type="button" data-action="spatial-data-load-configured">${icon("download")} Load official game map</button></div></div>`
+      : config.category
+        ? `<p class="tiny muted">${categoryCount} matching map features are ready.</p>`
+        : "";
   return `${hidden}<details class="deduction-question-fields simple-question-map-details" open><summary><span>${icon("map")} Information needed for the map</span><span class="badge badge-mint">Automatic</span></summary><div class="stack deduction-question-body">${fields}${dataNote}</div></details>`;
 }
 
@@ -375,6 +381,41 @@ function answerDetailsModal(state, instanceId) {
       <dl class="answer-details-meta"><div><dt>Asked</dt><dd>${escapeHtml(record.askedAt ? formatDateTime(record.askedAt) : "Not recorded")}</dd></div><div><dt>Answered</dt><dd>${escapeHtml(answeredAt)}</dd></div><div><dt>Reward</dt><dd>${record.rewardEarned === false ? "No reward — answered after deadline" : `Draw ${Number(reward.draw) || 0}, keep ${Number(reward.keep) || 0}`}</dd></div><div><dt>Phase</dt><dd>${escapeHtml(record.answeredPhase || record.phase || "Unknown")}</dd></div></dl>
       <div class="row wrap">${hasEvidence ? `<button class="button button-primary" type="button" data-action="view-evidence" data-question-instance="${escapeHtml(record.id)}">${icon("camera")} Open photo answer</button>` : ""}<button class="button button-soft" type="button" data-action="close-modal">Close</button></div>
     </article>
+  `);
+}
+
+function waterAnswerModal(state, instanceId) {
+  const record = state.questions.find((question) => question.id === instanceId);
+  if (!record) return frame("Question not found", "Body of Water", `<p class="muted">This question is no longer available.</p>`);
+  const seekerDistance = Number(record.mapReference?.seekerDistanceMetres ?? record.deductionInput?.seekerDistanceMetres);
+  const workflowVersion = Number(record.deductionInput?.waterWorkflowVersion || 0);
+  const baselineReady = Number.isFinite(seekerDistance);
+  const workflowReady = baselineReady && workflowVersion >= 2;
+  const baselineText = workflowReady ? `${Math.round(seekerDistance)} m` : "Re-ask required";
+  return frame("Calculate your Body of Water answer", "Your location and water-edge selection stay on this device. Only Closer or Further is shared with the seekers.", `
+    <form class="stack water-answer-form" data-form="water-answer" data-question-instance="${escapeHtml(instanceId || "")}">
+      <section class="water-baseline-card"><span>${icon("measure")}</span><div><small>Seeker’s recorded distance</small><strong>${escapeHtml(baselineText)}</strong><p>Measured from the shared seeker pin to the exact water-edge point shown with the question.</p></div></section>
+      ${workflowReady ? "" : `<div class="callout danger">${icon("alert")}<p>This question was created with the old water list or has no valid seeker distance. Ask the seekers to cancel it and re-ask Body of Water using <strong>Select nearest water edge on map</strong>.</p></div>`}
+      <section class="water-private-calculator" data-water-calculator data-location-prefix="hiderWaterLocation" data-edge-prefix="hiderWaterEdge" data-name-field="hiderWaterName" data-baseline-distance="${workflowReady ? seekerDistance : ""}">
+        <div class="water-private-banner">${icon("safety")}<p><strong>Private calculation:</strong> these two coordinates are not added to the shared question or sent to the opposing team.</p></div>
+        <div class="water-answer-step"><span>1</span><div><strong>Choose your current position</strong><p>Use your physical location at the moment you answer.</p></div></div>
+        ${deductionCoordinateFields("hiderWaterLocation", "Your current position", state.location?.current || null)}
+        <div class="water-answer-step"><span>2</span><div><strong>Tap your nearest valid water edge</strong><p>Pick the exact nearest edge of your own nearest named blue water area.</p></div></div>
+        <div class="field"><label for="hider-water-name">Water name <span class="field-optional">optional</span></label><input id="hider-water-name" name="hiderWaterName" maxlength="120" placeholder="For your own check only" data-action="water-reference-name" /></div>
+        <details class="manual-coordinate-details"><summary>Enter exact water-edge coordinates manually</summary><div class="field-row"><div class="field"><label for="hider-water-edge-lat">Edge latitude</label><input id="hider-water-edge-lat" name="hiderWaterEdgeLat" type="number" inputmode="decimal" step="any" min="-90" max="90" /></div><div class="field"><label for="hider-water-edge-lng">Edge longitude</label><input id="hider-water-edge-lng" name="hiderWaterEdgeLng" type="number" inputmode="decimal" step="any" min="-180" max="180" /></div></div></details>
+        <button class="button button-primary" type="button" data-action="coordinate-picker-open" data-prefix="hiderWaterEdge" data-label="Select your nearest valid water edge" data-picker-mode="water-edge" data-seeker-prefix="hiderWaterLocation">${icon("map")} Select my nearest water edge on map</button>
+        <div class="coordinate-selection-summary water-reference-summary" data-coordinate-summary="hiderWaterEdge" data-water-reference-summary>
+          ${icon("location")}<span>No water-edge point selected yet</span>
+          <a class="coordinate-preview-link" data-coordinate-preview="hiderWaterEdge" target="_blank" rel="noopener noreferrer" hidden>Open in Google Maps ${icon("external")}</a>
+          <small data-water-reference-distance>Choose your current position, then tap your nearest valid water edge.</small>
+        </div>
+        <input type="hidden" name="computedAnswer" value="" />
+        <div class="water-answer-result pending" data-water-answer-result role="status" aria-live="polite"><span>${icon("measure")}</span><div><small>Calculated answer</small><strong>Select both map points</strong><p>HideLine will compare your distance with the seeker’s recorded distance.</p></div></div>
+      </section>
+      <div class="field"><label for="water-answer-note">Optional explanation</label><textarea id="water-answer-note" name="note" maxlength="400" placeholder="Only add a note if the result needed judgement."></textarea></div>
+      <button class="button button-primary button-large" type="submit" data-water-answer-submit ${baselineReady ? "disabled" : "disabled"}>${icon("check")} Submit calculated answer</button>
+      <details class="manual-coordinate-details"><summary>Already measured outside HideLine?</summary><div class="stack"><p class="muted small">Use a manual answer only when you have independently followed the same nearest-edge rule.</p><div class="answer-grid"><button type="button" class="answer-button" data-action="answer-question" data-question-instance="${escapeHtml(instanceId || "")}" data-answer="Closer">Closer</button><button type="button" class="answer-button" data-action="answer-question" data-question-instance="${escapeHtml(instanceId || "")}" data-answer="Further">Further</button></div></div></details>
+    </form>
   `);
 }
 

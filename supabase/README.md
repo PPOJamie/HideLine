@@ -58,3 +58,7 @@ No database migration is required. Version 2.3.0 changes the client-side timer, 
 ## Upgrade to HideLine 2.3.1
 
 No database migration is required. Version 2.3.1 changes only the client-side Body of Water reference workflow and official administrative-boundary loader. Existing rooms, questions, answers and team-private deduction state remain compatible.
+
+## Upgrade to HideLine 2.3.2
+
+No database migration is required. Version 2.3.2 replaces only the client-side Body of Water interface and calculation flow. The seeker baseline remains part of the shared question, while the hider's temporary location and selected water-edge point remain local to the answering device and are not written to Supabase.

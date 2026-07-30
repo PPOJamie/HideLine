@@ -34,11 +34,28 @@ function renderChoiceAnswer(record) {
   return `<form class="choice-answer-form" data-form="choice-answer" data-question-instance="${escapeHtml(record.id)}"><div class="field"><label for="choice-${escapeHtml(record.id)}">Choose the mapped answer</label><select id="choice-${escapeHtml(record.id)}" name="answerFeatureId" required><option value="">Select one…</option>${choices.map((choice) => { const metres = Number(choice.distanceFromSeekerMetres); const suffix = Number.isFinite(metres) ? ` — ${metres < 1000 ? `${Math.round(metres)} m` : `${(metres / 1000).toFixed(1)} km`} from seeker pin` : ""; return `<option value="${escapeHtml(choice.id)}">${escapeHtml(choice.name + suffix)}</option>`; }).join("")}</select><span class="field-hint">Only mapped places within 2 km of the seeker pin are listed.</span></div><div class="field"><label for="choice-note-${escapeHtml(record.id)}">Optional explanation</label><textarea id="choice-note-${escapeHtml(record.id)}" name="note" maxlength="400"></textarea></div><button class="button button-primary" type="submit">${icon("check")} Submit selected answer</button></form>`;
 }
 
+function renderWaterAnswerAction(record) {
+  const seekerDistance = Number(record.mapReference?.seekerDistanceMetres ?? record.deductionInput?.seekerDistanceMetres);
+  const workflowReady = Number.isFinite(seekerDistance) && Number(record.deductionInput?.waterWorkflowVersion || 0) >= 2;
+  if (!workflowReady) {
+    return `<section class="water-answer-entry water-answer-entry-error"><div><span class="water-answer-entry-icon">${icon("alert")}</span><div><strong>This water question must be re-asked</strong><p>It was created with the old place-name list or has no valid seeker-to-edge distance. Ask the seekers to cancel it and use the new map-only Body of Water workflow.</p></div></div></section>`;
+  }
+  const distanceText = `${Math.round(seekerDistance)} m`;
+  return `<section class="water-answer-entry"><div><span class="water-answer-entry-icon">${icon("measure")}</span><div><strong>Use the private water calculator</strong><p>The seeker’s baseline is ${escapeHtml(distanceText)}. Pick your current location and your own nearest valid water edge; HideLine will calculate Closer or Further.</p></div></div><button class="button button-primary button-large" type="button" data-action="open-water-answer" data-question-instance="${escapeHtml(record.id)}">${icon("map")} Calculate and answer</button><small>Your two private map points are not shared with the seeker team.</small></section>`;
+}
+
 function renderActiveQuestion(record, now, canAnswer) {
   const definition = QUESTION_BY_ID.get(record.questionId) || record;
   const remaining = questionSecondsRemaining(record, now);
   const overdue = remaining < 0;
   const answerOptions = record.answers || definition.answers || [];
+  const answerControls = record.questionId === "measuring-water"
+    ? renderWaterAnswerAction(record)
+    : `${renderChoiceAnswer(record)}<div class="answer-grid simple-answer-grid">
+      ${answerOptions.filter((option) => !["Photo submitted", "POI name"].includes(option)).map((option) => `<button type="button" class="answer-button" data-action="answer-question" data-question-instance="${record.id}" data-answer="${escapeHtml(option)}">${escapeHtml(option)}</button>`).join("")}
+      ${definition.photo ? `<button type="button" class="answer-button" data-action="open-answer-photo" data-question-instance="${record.id}">${icon("camera")} Add photo</button>` : ""}
+      ${(definition.customInput || answerOptions.includes("POI name")) && !(record.answerChoices || []).length ? `<button type="button" class="answer-button" data-action="open-custom-answer" data-question-instance="${record.id}">${icon("edit")} Type answer</button>` : ""}
+    </div>`;
   return `<article class="card card-pad simple-active-question">
     <div class="simple-active-head">
       <div class="row align-start">${categoryIcon(record.category || definition.category)}<div><p class="eyebrow">Question waiting</p><h2>${escapeHtml(record.questionName || definition.name)}</h2><p>Asked ${relativeTime(record.askedAt, now)}</p></div></div>
@@ -48,11 +65,7 @@ function renderActiveQuestion(record, now, canAnswer) {
     ${renderQuestionLocations(record)}
     ${renderMapReference(record)}
     ${record.note ? `<p class="muted small question-clarification"><strong>Question note:</strong> ${escapeHtml(record.note)}</p>` : ""}
-    ${canAnswer ? `${renderChoiceAnswer(record)}<div class="answer-grid simple-answer-grid">
-      ${answerOptions.filter((option) => !["Photo submitted", "POI name"].includes(option)).map((option) => `<button type="button" class="answer-button" data-action="answer-question" data-question-instance="${record.id}" data-answer="${escapeHtml(option)}">${escapeHtml(option)}</button>`).join("")}
-      ${definition.photo ? `<button type="button" class="answer-button" data-action="open-answer-photo" data-question-instance="${record.id}">${icon("camera")} Add photo</button>` : ""}
-      ${(definition.customInput || answerOptions.includes("POI name")) && !(record.answerChoices || []).length ? `<button type="button" class="answer-button" data-action="open-custom-answer" data-question-instance="${record.id}">${icon("edit")} Type answer</button>` : ""}
-    </div>` : `<div class="callout">${icon("clock")}<p><strong>Waiting for the hider team.</strong>The timer is shared across the room.</p></div>`}
+    ${canAnswer ? answerControls : `<div class="callout">${icon("clock")}<p><strong>Waiting for the hider team.</strong>The timer is shared across the room.</p></div>`}
     ${overdue ? `<div class="callout danger">${icon("alert")}<p><strong>Time is up.</strong>Pause the game until the answer is complete; no card reward is earned.</p></div>` : ""}
   </article>`;
 }

@@ -2,6 +2,16 @@
 
 All notable changes to HideLine are documented here.
 
+## 2.3.2 — Map-only Body of Water workflow
+
+- Removed the Body of Water place-name dropdown completely. Water names are now optional audit text and are never used to choose a reference automatically.
+- Added a seeker two-point workflow: select the seeker location, tap the exact nearest valid water edge on the basemap, and store the calculated baseline distance.
+- Added a hider-only calculator that compares the hider's current position with their own selected nearest water edge and submits only Closer or Further.
+- Added a clear map key, player-location marker and measurement line to both online and built-in fallback coordinate maps.
+- Excluded point placemarks, station pins, pools and fountains from automatic water geometry. Canada Water station can no longer be interpreted as a body of water.
+- Marked pending questions created with the old water-list workflow for re-asking instead of reusing an untrusted reference.
+- Bumped the PWA shell and deployment guard to 2.3.2. No Supabase migration is required.
+
 ## 2.3.1 — Water-edge picker and administrative-boundary repair
 
 - Added a dedicated Body of Water map picker that can snap a mapped water polygon to its nearest shoreline point from the seeker pin.

@@ -9,7 +9,8 @@ import {
   nearestFeature,
   pointInManualArea,
   resolveFeatureAnswer,
-  spatialCategoryLabel
+  spatialCategoryLabel,
+  usableWaterFeatures
 } from "./spatial.js";
 import { stationNameLength } from "../data/stations.js";
 import { STATION_GEO, STATION_GEO_BY_ID, RAIL_LINE_BY_ID, stationsForLine } from "../data/station-geo.js";
@@ -292,14 +293,40 @@ function prepareConstraint(constraint, context = {}) {
   if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE && constraint.manualReference && !constraint.referenceFeatureId) {
     const seeker = finitePoint(constraint.seeker);
     if (!seeker) return { ...runtime, ready: false, manual: true, reason: "The seeker's pin is missing." };
+    const storedDistance = Number(constraint.seekerDistanceMetres);
+    const referencePoint = finitePoint(constraint.referencePoint);
+    if (constraint.category === "water") {
+      const waterFeatures = usableWaterFeatures(featuresForCategory(spatialFeatures, "water"));
+      if (waterFeatures.length && Number.isFinite(storedDistance)) {
+        return {
+          ...runtime,
+          ready: true,
+          manual: false,
+          features: waterFeatures,
+          referencePoint,
+          seekerDistanceMetres: storedDistance,
+          measurementMethod: constraint.measurementMethod || "exact player-selected nearest water edge",
+          reason: "The seeker baseline was selected manually; candidate locations are compared with their nearest usable water-edge geometry."
+        };
+      }
+      return {
+        ...runtime,
+        ready: false,
+        manual: true,
+        referencePoint,
+        seekerDistanceMetres: Number.isFinite(storedDistance) ? storedDistance : null,
+        measurementMethod: constraint.measurementMethod || "exact player-selected nearest water edge",
+        reason: "The question and answer are valid, but automatic map shading needs a usable polygon or line layer for named bodies of water. Point placemarks and station pins are deliberately ignored."
+      };
+    }
     return {
       ...runtime,
       ready: false,
       manual: true,
-      referencePoint: finitePoint(constraint.referencePoint),
-      seekerDistanceMetres: Number.isFinite(Number(constraint.seekerDistanceMetres)) ? Number(constraint.seekerDistanceMetres) : null,
-      measurementMethod: constraint.measurementMethod || "player-confirmed shoreline point",
-      reason: "The exact seeker shoreline and distance are recorded. Safe automatic elimination needs a complete named body-of-water layer, so this player-selected reference remains a visible review clue."
+      referencePoint,
+      seekerDistanceMetres: Number.isFinite(storedDistance) ? storedDistance : null,
+      measurementMethod: constraint.measurementMethod || "player-confirmed reference point",
+      reason: "The exact player-selected reference and distance are recorded, but automatic elimination needs a complete feature layer."
     };
   }
 
@@ -309,7 +336,8 @@ function prepareConstraint(constraint, context = {}) {
     DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE,
     DEDUCTION_TOOL_TYPES.TENTACLE
   ].includes(constraint.type)) {
-    const features = featuresForCategory(spatialFeatures, constraint.category);
+    const rawFeatures = featuresForCategory(spatialFeatures, constraint.category);
+    const features = constraint.category === "water" ? usableWaterFeatures(rawFeatures) : rawFeatures;
     if (!features.length) {
       return {
         ...runtime,

@@ -2071,3 +2071,233 @@ select[multiple] option { padding: 7px 8px; border-radius: 7px; }
   .boundary-source-status.status-ready { border-color: rgba(0,199,178,.34); background: rgba(0,199,178,.12); }
   .boundary-source-status.status-error { border-color: rgba(255,118,140,.38); background: rgba(181,35,58,.18); }
 }
+
+/* HideLine 2.3.2: map-only Body of Water workflow */
+.field-optional {
+  color: var(--ink-500, #6b7785);
+  font-size: .72em;
+  font-weight: 700;
+}
+.water-question-steps {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: water-step;
+}
+.water-question-steps li {
+  counter-increment: water-step;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 3px 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid rgba(22,110,167,.16);
+  border-radius: 13px;
+  background: rgba(255,255,255,.72);
+}
+.water-question-steps li::before {
+  content: counter(water-step);
+  grid-row: 1 / span 2;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #166ea7;
+  color: white;
+  font-size: .76rem;
+  font-weight: 900;
+}
+.water-question-steps strong { font-size: .8rem; }
+.water-question-steps span { color: var(--ink-600); font-size: .71rem; line-height: 1.4; }
+.water-map-instruction { margin-bottom: 2px; }
+
+.water-answer-entry {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 15px;
+  border: 2px solid rgba(22,110,167,.24);
+  border-radius: 18px;
+  background: linear-gradient(145deg,rgba(84,183,232,.11),rgba(255,255,255,.98));
+}
+.water-answer-entry > div:first-child {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+}
+.water-answer-entry-icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: #166ea7;
+  color: #fff;
+}
+.water-answer-entry strong { display: block; margin-bottom: 3px; }
+.water-answer-entry p,
+.water-answer-entry small { margin: 0; color: var(--ink-600); line-height: 1.45; }
+.water-answer-entry p { font-size: .78rem; }
+.water-answer-entry small { font-size: .69rem; font-weight: 700; }
+
+.water-answer-form { max-width: 720px; }
+.water-baseline-card,
+.water-answer-result {
+  display: grid;
+  grid-template-columns: 46px minmax(0,1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border-radius: 17px;
+}
+.water-baseline-card {
+  border: 2px solid rgba(22,110,167,.23);
+  background: rgba(84,183,232,.10);
+}
+.water-baseline-card > span,
+.water-answer-result > span {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+}
+.water-baseline-card > span { background: #166ea7; color: #fff; }
+.water-baseline-card small,
+.water-answer-result small { display: block; color: var(--ink-600); font-size: .67rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+.water-baseline-card strong,
+.water-answer-result strong { display: block; margin: 2px 0; font-size: 1.25rem; }
+.water-baseline-card p,
+.water-answer-result p { margin: 0; color: var(--ink-600); font-size: .73rem; line-height: 1.45; }
+.water-private-calculator {
+  display: grid;
+  gap: 13px;
+  padding: 15px;
+  border: 1px solid var(--ink-200);
+  border-radius: 18px;
+  background: var(--surface, #fff);
+}
+.water-private-banner {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 10px 11px;
+  border-radius: 13px;
+  background: rgba(0,153,132,.08);
+  color: var(--ink-700);
+}
+.water-private-banner svg { flex: 0 0 19px; color: #007e6d; }
+.water-private-banner p { margin: 0; font-size: .73rem; line-height: 1.45; }
+.water-answer-step {
+  display: grid;
+  grid-template-columns: 32px minmax(0,1fr);
+  gap: 10px;
+  align-items: center;
+}
+.water-answer-step > span {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #0b1f33;
+  color: white;
+  font-size: .78rem;
+  font-weight: 900;
+}
+.water-answer-step strong { display: block; font-size: .82rem; }
+.water-answer-step p { margin: 2px 0 0; color: var(--ink-600); font-size: .71rem; line-height: 1.4; }
+.water-answer-result { border: 2px solid var(--ink-200); background: var(--ink-50); }
+.water-answer-result > span { background: var(--ink-200); color: var(--ink-700); }
+.water-answer-result.closer { border-color: rgba(0,141,115,.42); background: rgba(0,199,178,.10); }
+.water-answer-result.closer > span { background: #008d73; color: #fff; }
+.water-answer-result.closer strong { color: #006b57; }
+.water-answer-result.further { border-color: rgba(190,72,28,.42); background: rgba(244,126,75,.10); }
+.water-answer-result.further > span { background: #bd481c; color: #fff; }
+.water-answer-result.further strong { color: #8e3211; }
+.water-answer-result.review { border-color: rgba(178,113,0,.42); background: rgba(228,161,27,.11); }
+.water-answer-result.review > span { background: #a96c00; color: #fff; }
+.water-answer-result.review strong { color: #815100; }
+
+@media (max-width: 680px) {
+  .water-answer-entry .button,
+  .water-private-calculator > .button,
+  .water-answer-form > .button { width: 100%; }
+  .water-baseline-card,
+  .water-answer-result { grid-template-columns: 40px minmax(0,1fr); padding: 12px; }
+  .water-baseline-card > span,
+  .water-answer-result > span { width: 38px; height: 38px; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .water-question-steps li { border-color: rgba(103,199,242,.20); background: rgba(11,31,51,.48); }
+  .water-question-steps span,
+  .water-answer-entry p,
+  .water-answer-entry small,
+  .water-baseline-card small,
+  .water-baseline-card p,
+  .water-answer-result small,
+  .water-answer-result p,
+  .water-answer-step p { color: #a9bdc9; }
+  .water-answer-entry { border-color: rgba(103,199,242,.30); background: linear-gradient(145deg,rgba(22,110,167,.24),#10283b); }
+  .water-baseline-card { border-color: rgba(103,199,242,.28); background: rgba(22,110,167,.18); }
+  .water-private-calculator { border-color: #27465c; background: #10283b; }
+  .water-private-banner { background: rgba(0,199,178,.12); color: #d8e8ef; }
+  .water-answer-result { border-color: #36566c; background: #0b1f33; }
+  .water-answer-result.closer strong { color: #6de0c8; }
+  .water-answer-result.further strong { color: #ff9b72; }
+  .water-answer-result.review strong { color: #ffd166; }
+}
+
+.coordinate-picker-water-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  padding: 9px 11px;
+  border: 1px solid rgba(22,110,167,.18);
+  border-radius: 13px;
+  background: rgba(84,183,232,.07);
+  color: var(--ink-700);
+  font-size: .7rem;
+  font-weight: 750;
+}
+.coordinate-picker-water-legend span { display: inline-flex; gap: 7px; align-items: center; }
+.coordinate-picker-water-legend i { display: inline-block; flex: 0 0 auto; }
+.coordinate-picker-water-legend .water-origin-key {
+  width: 12px;
+  height: 12px;
+  border: 3px solid #0b4f75;
+  border-radius: 999px;
+  background: #54b7e8;
+}
+.coordinate-picker-water-legend .water-edge-key {
+  width: 10px;
+  height: 14px;
+  border: 2px solid #0b1f33;
+  border-radius: 8px 8px 8px 1px;
+  background: #f26a3d;
+  transform: rotate(45deg);
+}
+.coordinate-picker-water-legend .water-line-key {
+  width: 24px;
+  border-top: 3px dashed #ef7d00;
+}
+@media (max-width: 520px) {
+  .coordinate-picker-water-legend { display: grid; grid-template-columns: 1fr; }
+}
+@media (prefers-color-scheme: dark) {
+  .coordinate-picker-water-legend { border-color: rgba(103,199,242,.25); background: rgba(22,110,167,.16); color: #d8e8ef; }
+}
+.water-answer-entry-error {
+  border-color: rgba(181,35,58,.34);
+  background: rgba(218,24,62,.07);
+}
+.water-answer-entry-error .water-answer-entry-icon { background: #9d2438; }
+@media (prefers-color-scheme: dark) {
+  .water-answer-entry-error { border-color: rgba(255,118,140,.38); background: rgba(181,35,58,.18); }
+}

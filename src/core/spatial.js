@@ -40,11 +40,14 @@ const CATEGORY_PATTERNS = Object.freeze([
   ["museum", /museum|gallery/i],
   ["zoo", /zoo|city\s*farm|children'?s\s*farm/i],
   ["park", /parks?|public\s*gardens?|green\s*spaces?/i],
-  ["water", /body\s*of\s*water|water|lake|pond|reservoir|basin|dock|canal/i],
+  // Station layers must be checked before the broad word “water”. Otherwise
+  // a hiding-station placemark such as Canada Water is misclassified as a
+  // body of water merely because of its name.
+  ["station", /hiding\s*stations?|rail\s*stations?|stations?/i],
+  ["water", /body\s*of\s*water|water|lake|pond|reservoir|basin|dock|canal|river|stream/i],
   ["place_of_worship", /place\s*of\s*worship|church|mosque|synagogue|temple/i],
   ["grocery", /grocery|supermarket/i],
-  ["restaurant", /restaurant/i],
-  ["station", /hiding\s*stations?|rail\s*stations?|stations?/i]
+  ["restaurant", /restaurant/i]
 ]);
 
 export function normaliseSpatialName(value) {
@@ -66,6 +69,50 @@ export function inferSpatialCategory(...values) {
     if (pattern.test(text)) return category;
   }
   return "unknown";
+}
+
+
+
+const WATER_GEOMETRY_TYPES = new Set(["LineString", "MultiLineString", "Polygon", "MultiPolygon"]);
+const INVALID_WATER_TEXT = /swimming\s*pool|paddling\s*pool|fountain|splash\s*park|hiding\s*station|rail\s*station|underground|overground|dlr/i;
+
+/**
+ * Return true only for geometry that can represent a water edge. Point
+ * placemarks are deliberately rejected: the handbook requires measurement to
+ * the nearest edge of the blue water shape, not to a POI or station pin.
+ */
+export function isUsableWaterFeature(feature) {
+  if (!feature || feature.category !== "water") return false;
+  if (!WATER_GEOMETRY_TYPES.has(String(feature.geometry?.type || ""))) return false;
+  const text = `${feature.layer || ""} ${feature.name || ""} ${feature.properties?.description || ""}`;
+  return !INVALID_WATER_TEXT.test(text);
+}
+
+export function usableWaterFeatures(features = []) {
+  return (features || []).filter(isUsableWaterFeature);
+}
+
+export function bodyOfWaterDistanceResult(location, edge, seekerDistanceMetres, toleranceMetres = 1) {
+  const locationLat = Number(location?.lat);
+  const locationLng = Number(location?.lng);
+  const edgeLat = Number(edge?.lat);
+  const edgeLng = Number(edge?.lng);
+  const baseline = Number(seekerDistanceMetres);
+  if (![locationLat, locationLng, edgeLat, edgeLng, baseline].every(Number.isFinite)) {
+    return { answer: "", playerDistanceMetres: null, differenceMetres: null, ready: false };
+  }
+  const playerDistanceMetres = haversineMetres(
+    { lat: locationLat, lng: locationLng },
+    { lat: edgeLat, lng: edgeLng }
+  );
+  const differenceMetres = playerDistanceMetres - baseline;
+  const tolerance = Math.max(0, Number(toleranceMetres) || 0);
+  return {
+    answer: Math.abs(differenceMetres) < tolerance ? "" : differenceMetres < 0 ? "Closer" : "Further",
+    playerDistanceMetres,
+    differenceMetres,
+    ready: Math.abs(differenceMetres) >= tolerance
+  };
 }
 
 export function spatialCategoryLabel(category) {
