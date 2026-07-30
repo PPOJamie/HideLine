@@ -249,15 +249,17 @@ export function thamesSide(point, toleranceMetres = null) {
   return nearest.cross >= 0 ? "north" : "south";
 }
 
-function nearestStationDistance(point) {
+function nearestStationDistance(point, stationGeos = STATION_GEO) {
   let distance = Infinity;
-  for (const station of STATION_GEO) distance = Math.min(distance, haversineMetres(point, station));
+  for (const station of stationGeos || STATION_GEO) {
+    if (finitePoint(station)) distance = Math.min(distance, haversineMetres(point, station));
+  }
   return distance;
 }
 
 function prepareConstraint(constraint, context = {}) {
   const spatialFeatures = context.spatialFeatures || [];
-  const runtime = { constraint, ready: true, manual: false, reason: "", features: [] };
+  const runtime = { constraint, ready: true, manual: false, reason: "", features: [], stationGeos: context.stationGeos || STATION_GEO };
   const answer = canonicalAnswer(constraint.answer);
 
   if (constraint.type === DEDUCTION_TOOL_TYPES.MANUAL_REVIEW) {
@@ -457,8 +459,8 @@ function pointPassRuntime(runtime, point) {
     if (answer === "further") return candidate.distanceMetres > runtime.seekerDistanceMetres;
   }
   if (constraint.type === DEDUCTION_TOOL_TYPES.NEAREST_STATION_DISTANCE) {
-    const seekerDistance = nearestStationDistance(constraint.seeker);
-    const candidateDistance = nearestStationDistance(point);
+    const seekerDistance = nearestStationDistance(constraint.seeker, runtime.stationGeos);
+    const candidateDistance = nearestStationDistance(point, runtime.stationGeos);
     if (answer === "closer") return candidateDistance < seekerDistance;
     if (answer === "further") return candidateDistance > seekerDistance;
   }
@@ -544,14 +546,14 @@ export function evaluateStationPossibilities({
   spatialFeatures = []
 } = {}) {
   const sourceStations = stations || [];
-  const context = { spatialFeatures };
+  const context = { spatialFeatures, stationGeos: sourceStations };
   const runtimes = constraints.map((constraint) => prepareConstraint(constraint, context));
   const stationRuntimes = runtimes.filter((runtime) => STATION_LEVEL_TYPES.has(runtime.constraint.type));
   const mobileRuntimes = runtimes.filter((runtime) => !STATION_LEVEL_TYPES.has(runtime.constraint.type) && runtime.constraint.movementMode !== DEDUCTION_MOVEMENT.LOCKED);
   const lockedRuntimes = runtimes.filter((runtime) => !STATION_LEVEL_TYPES.has(runtime.constraint.type) && runtime.constraint.movementMode === DEDUCTION_MOVEMENT.LOCKED);
 
   return sourceStations.map((station) => {
-    const geo = STATION_GEO_BY_ID.get(station.id) || station;
+    const geo = finitePoint(station) ? station : (STATION_GEO_BY_ID.get(station.id) || station);
     const samples = sampleZonePoints(geo, radiusMetres);
     const failures = [];
     const partials = [];
@@ -634,11 +636,12 @@ export function evaluateZoneAreaMask({
   mode = "constraint",
   activeConstraintId = null,
   spatialFeatures = [],
+  stationGeos = [],
   radiusMetres = DEFAULT_DURATIONS.hidingZoneRadiusMetres,
   cellSizeMetres = 70
 } = {}) {
   const cells = sampleZoneCells(station, radiusMetres, cellSizeMetres);
-  const context = { spatialFeatures };
+  const context = { spatialFeatures, stationGeos: stationGeos.length ? stationGeos : STATION_GEO };
   let selectedConstraints;
   let carriedStationExclusions = [];
   if (mode === "endgame") {
@@ -677,7 +680,7 @@ export function evaluateZoneAreaMask({
   const runtimes = selectedConstraints.map((constraint) => prepareConstraint(constraint, context));
   const stationRuntimes = runtimes.filter((runtime) => STATION_LEVEL_TYPES.has(runtime.constraint.type));
   const areaRuntimes = runtimes.filter((runtime) => !STATION_LEVEL_TYPES.has(runtime.constraint.type));
-  const stationGeo = STATION_GEO_BY_ID.get(station?.id) || station;
+  const stationGeo = finitePoint(station) ? station : (STATION_GEO_BY_ID.get(station?.id) || station);
   const stationResults = stationRuntimes.map((runtime) => stationLevelPass(runtime.constraint, station, stationGeo));
   const stationFailureCount = stationResults.filter((value) => value === false).length + carriedStationExclusions.length;
   const stationUnknownCount = stationResults.filter((value) => value === null).length;

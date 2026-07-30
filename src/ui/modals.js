@@ -1,5 +1,4 @@
 import { APP_VERSION, DEFAULT_DURATIONS, PHASES, TEAM_LABELS } from "../core/constants.js";
-import { BUILT_IN_WATER_DATA } from "../data/water-edges.js";
 import { escapeHtml, formatDateTime } from "../core/format.js";
 import { QUESTION_BY_ID, repeatedReward } from "../data/questions.js";
 import { CARD_TYPES } from "../data/rules.js";
@@ -233,7 +232,7 @@ function deductionMovementInput(state) {
 }
 
 function questionSpatialData(state) {
-  return mergeSpatialData(BUILT_IN_WATER_DATA, state.privateTeamState?.spatialData, state.referenceData);
+  return mergeSpatialData(state.waterData, state.officialMapData, state.privateTeamState?.spatialData, state.referenceData);
 }
 
 const REFERENCE_SELECT_CATEGORIES = new Set(["park", "zoo", "museum", "cinema", "hospital", "library", "consulate", "aquarium", "high_speed_rail", "borough"]);
@@ -253,7 +252,7 @@ function waterReferenceFields() {
   return `<section class="water-reference-picker" data-water-calculator data-location-prefix="deductionSeeker" data-edge-prefix="deductionWaterPoint" data-name-field="deductionWaterName" data-mode-field="deductionWaterReferenceMode" data-feature-id-field="deductionWaterFeatureId">
     <input type="hidden" name="deductionWaterReferenceMode" value="auto" />
     <input type="hidden" name="deductionWaterFeatureId" value="" />
-    <div class="water-reference-heading"><span class="water-reference-icon">${icon("measure")}</span><div><strong>Nearest Body of Water edge</strong><p>After you choose the seeker pin, HideLine automatically selects the nearest shoreline or bank from its built-in Central London water atlas.</p></div></div>
+    <div class="water-reference-heading"><span class="water-reference-icon">${icon("measure")}</span><div><strong>Nearest Body of Water edge</strong><p>After you choose the seeker pin, HideLine automatically selects the nearest named shoreline or bank from the deployed OpenStreetMap water-edge snapshot.</p></div></div>
     <ol class="water-question-steps">
       <li><strong>Choose the seeker pin above.</strong><span>The nearest mapped water edge and distance will appear automatically.</span></li>
       <li><strong>Review only when needed.</strong><span>Open the water map if the automatic edge looks wrong or a tiny local water body is missing.</span></li>
@@ -267,9 +266,9 @@ function waterReferenceFields() {
     <div class="coordinate-selection-summary water-reference-summary" data-coordinate-summary="deductionWaterPoint" data-water-reference-summary>
       ${icon("location")}<span>Choose the seeker pin to calculate the nearest edge</span>
       <a class="coordinate-preview-link" data-coordinate-preview="deductionWaterPoint" target="_blank" rel="noopener noreferrer" hidden>Open in Google Maps ${icon("external")}</a>
-      <small data-water-reference-distance>HideLine will select the nearest built-in water edge automatically.</small>
+      <small data-water-reference-distance>HideLine will select the nearest named water edge automatically.</small>
     </div>
-    <div class="callout water-rule-note">${icon("info")}<p><strong>What counts:</strong> a named area shaded blue on the normal map. Measure to its nearest edge. Swimming pools and fountains do not count. The hider uses the same atlas privately for their own location.</p></div>
+    <div class="callout water-rule-note">${icon("info")}<p><strong>What counts:</strong> a named area shaded blue on the normal map. Measure to its nearest edge. Swimming pools and fountains do not count. The hider uses the same deployed water geometry privately for their own location.</p></div>
   </section>`;
 }
 
@@ -318,7 +317,7 @@ function questionDeductionFields(state, question) {
   }
 
   const dataNote = question.id === "measuring-water"
-    ? `<div class="callout success water-atlas-ready">${icon("check")}<p><strong>${categoryCount} built-in named water shapes are ready.</strong> The exact nearest-edge calculation and Find Hiders shading now use the same bundled atlas. You can still review the selected edge on the map.</p></div>`
+    ? `<div class="callout success water-atlas-ready">${icon("check")}<p><strong>${categoryCount} named OpenStreetMap water shapes are ready.</strong> The exact nearest-edge calculation and Find Hiders shading now use the same deployed water geometry. You can still review the selected edge on the map.</p></div>`
     : config.category && !categoryCount
       ? `<div class="callout warning map-data-question-warning">${icon("info")}<div><p>This question needs ${escapeHtml(config.dataLabel || spatialCategoryLabel(config.category))}. Borough, ward and constituency polygons load from HideLine's built-in official sources; curated POIs come from the supplied game map.</p><button class="button button-soft button-small" type="button" data-action="spatial-data-load-configured">${icon("download")} Load official game map</button></div></div>`
       : config.category
@@ -399,21 +398,21 @@ function waterAnswerModal(state, instanceId) {
   return frame("Calculate your Body of Water answer", "Your location and water-edge selection stay on this device. Only Closer or Further is shared with the seekers.", `
     <form class="stack water-answer-form" data-form="water-answer" data-question-instance="${escapeHtml(instanceId || "")}">
       <section class="water-baseline-card"><span>${icon("measure")}</span><div><small>Seeker’s recorded distance</small><strong>${escapeHtml(baselineText)}</strong><p>Measured from the shared seeker pin to the exact water-edge point shown with the question.</p></div></section>
-      ${workflowReady ? "" : `<div class="callout danger">${icon("alert")}<p>This question was created with the old water list or has no valid seeker distance. Ask the seekers to cancel it and re-ask Body of Water with the current built-in water atlas.</p></div>`}
+      ${workflowReady ? "" : `<div class="callout danger">${icon("alert")}<p>This question was created with the old water list or has no valid seeker distance. Ask the seekers to cancel it and re-ask Body of Water after the current water-edge data has loaded.</p></div>`}
       <section class="water-private-calculator" data-water-calculator data-location-prefix="hiderWaterLocation" data-edge-prefix="hiderWaterEdge" data-name-field="hiderWaterName" data-mode-field="hiderWaterReferenceMode" data-feature-id-field="hiderWaterFeatureId" data-baseline-distance="${workflowReady ? seekerDistance : ""}">
         <input type="hidden" name="hiderWaterReferenceMode" value="auto" />
         <input type="hidden" name="hiderWaterFeatureId" value="" />
         <div class="water-private-banner">${icon("safety")}<p><strong>Private calculation:</strong> these two coordinates are not added to the shared question or sent to the opposing team.</p></div>
         <div class="water-answer-step"><span>1</span><div><strong>Choose your current position</strong><p>Use your physical location at the moment you answer.</p></div></div>
         ${deductionCoordinateFields("hiderWaterLocation", "Your current position", state.location?.current || null)}
-        <div class="water-answer-step"><span>2</span><div><strong>Check the automatic nearest edge</strong><p>HideLine selects the nearest bank or shoreline from the built-in atlas. Review it on the map only if needed.</p></div></div>
+        <div class="water-answer-step"><span>2</span><div><strong>Check the automatic nearest edge</strong><p>HideLine selects the nearest bank or shoreline from the deployed OpenStreetMap data. Review it on the map only if needed.</p></div></div>
         <div class="field"><label for="hider-water-name">Selected body of water</label><input id="hider-water-name" name="hiderWaterName" maxlength="120" placeholder="Filled automatically" data-action="water-reference-name" /></div>
         <details class="manual-coordinate-details"><summary>Enter exact water-edge coordinates manually</summary><div class="field-row"><div class="field"><label for="hider-water-edge-lat">Edge latitude</label><input id="hider-water-edge-lat" name="hiderWaterEdgeLat" type="number" inputmode="decimal" step="any" min="-90" max="90" /></div><div class="field"><label for="hider-water-edge-lng">Edge longitude</label><input id="hider-water-edge-lng" name="hiderWaterEdgeLng" type="number" inputmode="decimal" step="any" min="-180" max="180" /></div></div></details>
         <div class="water-reference-actions"><button class="button button-soft" type="button" data-action="water-reference-auto">${icon("refresh")} Recalculate nearest edge</button><button class="button button-primary" type="button" data-action="coordinate-picker-open" data-prefix="hiderWaterEdge" data-label="Review your nearest valid water edge" data-picker-mode="water-edge" data-seeker-prefix="hiderWaterLocation">${icon("map")} Review on map</button></div>
         <div class="coordinate-selection-summary water-reference-summary" data-coordinate-summary="hiderWaterEdge" data-water-reference-summary>
           ${icon("location")}<span>Choose your location to calculate the nearest edge</span>
           <a class="coordinate-preview-link" data-coordinate-preview="hiderWaterEdge" target="_blank" rel="noopener noreferrer" hidden>Open in Google Maps ${icon("external")}</a>
-          <small data-water-reference-distance>HideLine will select your nearest built-in water edge automatically.</small>
+          <small data-water-reference-distance>HideLine will select your nearest named water edge automatically.</small>
         </div>
         <input type="hidden" name="computedAnswer" value="" />
         <div class="water-answer-result pending" data-water-answer-result role="status" aria-live="polite"><span>${icon("measure")}</span><div><small>Calculated answer</small><strong>Choose your location</strong><p>HideLine will select your nearest mapped water edge and compare the distances.</p></div></div>

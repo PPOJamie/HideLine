@@ -104,9 +104,9 @@ test("boundary parser accepts ArcGIS JSON when GeoJSON is unavailable", async ()
   assert.equal(result.features[0].properties.LAD25NM, "Test Borough");
 });
 
-test("Body of Water asking automatically uses the built-in water atlas without a place-name dropdown", () => {
+test("Body of Water asking uses deployment-generated water geometry without a place-name dropdown", () => {
   const html = renderModal("ask-question", modalState(), { questionId: "measuring-water" });
-  assert.match(html, /automatically selects the nearest shoreline or bank/i);
+  assert.match(html, /automatically selects the nearest named shoreline or bank/i);
   assert.match(html, /Recalculate nearest edge/);
   assert.match(html, /Review on map/);
   assert.match(html, /data-picker-mode="water-edge"/);
@@ -119,7 +119,7 @@ test("Body of Water asking automatically uses the built-in water atlas without a
   assert.doesNotMatch(html, /<select[^>]*deduction-water/i);
   assert.doesNotMatch(html, /<option[^>]*>Test Water<\/option>/);
   assert.match(appSource, /waterWorkflowVersion:\s*3/);
-  assert.match(appSource, /built-in Central London water atlas/i);
+  assert.match(appSource, /deployment-generated OpenStreetMap water geometry/i);
 });
 
 test("Body of Water answering uses a private automatic nearest-edge calculator", () => {
@@ -227,7 +227,7 @@ test("the coordinate picker keeps its confirmation footer visible and draws wate
   assert.match(mapSource, /coordinatePickerOriginMarker/);
   assert.match(mapSource, /coordinatePickerGuideLine/);
   assert.match(mapSource, /data-picker-guide/);
-  assert.match(mapSource, /built-in water-edge atlas/i);
+  assert.match(mapSource, /deployed OpenStreetMap water-edge snapshot/i);
   assert.match(appSource, /coordinate-picker-water-legend/);
   assert.match(appSource, /coordinate-picker-footer/);
   assert.match(appSource, /Use this water edge/);

@@ -4,7 +4,7 @@ import { randomId, roomCode } from "./format.js";
 
 export function createDefaultState() {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     profile: {
       id: localStorage.getItem("hideline:device-id") || randomId("device"),
       name: "Player",
@@ -49,6 +49,8 @@ export function createDefaultState() {
     location: { sharing: false, shareWith: "team", current: null, error: null },
     tfl: { status: "idle", updatedAt: null, lines: [], error: null },
     referenceData: { status: "idle", updatedAt: null, sourceName: "Built-in official administrative boundaries", features: [], sources: [], errors: [], error: null },
+    officialMapData: { status: "idle", updatedAt: null, sourceName: "Official Google My Map", features: [], error: null },
+    waterData: { status: "idle", updatedAt: null, sourceName: "OpenStreetMap named water edges", features: [], error: null, delivery: null },
     checklist: {},
     settings: {
       repeatRewardMode: "multiply-both",
@@ -147,6 +149,11 @@ export class Store extends EventTarget {
         this.state.schemaVersion = 6;
         this.state.referenceData = { status: "idle", updatedAt: null, sourceName: "Built-in official administrative boundaries", features: [], sources: [], errors: [], error: null };
       }
+      if (previousSchema < 7) {
+        this.state.schemaVersion = 7;
+        this.state.officialMapData = { status: "idle", updatedAt: null, sourceName: "Official Google My Map", features: [], error: null };
+        this.state.waterData = { status: "idle", updatedAt: null, sourceName: "OpenStreetMap named water edges", features: [], error: null, delivery: null };
+      }
     } catch {
       this.state = defaults;
     }
@@ -184,6 +191,8 @@ export class Store extends EventTarget {
       // full geometry out of localStorage prevents quota errors on phones.
       const value = structuredClone(this.state);
       if (value.referenceData) value.referenceData = { ...value.referenceData, status: "idle", features: [] };
+      if (value.officialMapData) value.officialMapData = { ...value.officialMapData, status: "idle", features: [] };
+      if (value.waterData) value.waterData = { ...value.waterData, status: "idle", features: [] };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
     } catch (error) { console.warn("State could not be persisted", error); }
   }

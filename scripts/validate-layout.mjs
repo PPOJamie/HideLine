@@ -19,26 +19,39 @@ assert(worker.includes(`hideline-shell-v${APP_VERSION}`), `service-worker.js mus
 assert(worker.includes(`./src/app.js?v=${APP_VERSION}`), "The service worker must cache the versioned app entry file.");
 assert(worker.includes("./src/core/notifications.js"), "The service worker must cache the notifications module.");
 assert(worker.includes("./src/core/question-location.js"), "The service worker must cache the question-location module.");
-assert(worker.includes("./src/services/reference-data.js"), "The service worker must cache the official boundary loader.");
-assert(worker.includes("./src/data/water-edges.js"), "The service worker must cache the built-in water-edge atlas.");
+assert(worker.includes("./src/core/station-authority.js"), "The service worker must cache the official station-pin resolver.");
+assert(worker.includes("./src/services/reference-data.js"), "The service worker must cache the official administrative-boundary loader.");
+assert(worker.includes("./src/services/water-data.js"), "The service worker must cache the deployment water-data loader.");
+assert(!worker.includes("./src/data/water-edges.js"), "The retired hand-drawn water atlas must not be part of the active application shell.");
+assert(worker.includes('url.pathname.includes("/data/")'), "Generated map snapshots must use a network-first cache policy.");
 
 const requiredFiles = [
   "src/app.js",
   "src/styles.css",
   "src/core/notifications.js",
   "src/core/question-location.js",
+  "src/core/station-authority.js",
   "src/ui/question-location.js",
   "src/ui/questions-view.js",
   "src/ui/modals.js",
   "src/ui/shell.js",
   "src/services/supabase.js",
   "src/services/reference-data.js",
-  "src/data/water-edges.js"
+  "src/services/spatial-data.js",
+  "src/services/water-data.js",
+  "scripts/fetch-authoritative-map-data.mjs",
+  "data/README.md",
+  ".github/workflows/pages.yml"
 ];
 for (const relative of requiredFiles) {
   try { await access(resolve(root, relative)); }
   catch { failures.push(`Required application file is missing: ${relative}`); }
 }
+
+const workflow = await readFile(resolve(root, ".github/workflows/pages.yml"), "utf8");
+assert(workflow.includes("fetch-authoritative-map-data.mjs --strict"), "GitHub Pages must generate and validate the official map and water snapshots before deployment.");
+assert(workflow.includes("actions/cache@v4"), "GitHub Pages must retain the last verified map snapshots for temporary source outages.");
+assert(workflow.indexOf("fetch-authoritative-map-data.mjs --strict") < workflow.indexOf("actions/upload-pages-artifact"), "Map snapshots must be generated before the Pages artifact is uploaded.");
 
 const rootEntries = await readdir(root, { withFileTypes: true });
 const allowedRootJs = new Set(["config.js", "config.example.js", "service-worker.js"]);
@@ -61,6 +74,10 @@ assert(!suspiciousDuplicates.length, `Duplicate browser-upload files are present
 const appSource = await readFile(resolve(root, "src/app.js"), "utf8");
 assert(appSource.includes("serialiseQuestionLocations"), "src/app.js is missing canonical question-coordinate persistence.");
 assert(appSource.includes("syncPendingQuestionNotifications"), "src/app.js is missing pending-question notification reconciliation.");
+assert(appSource.includes("loadOfficialGameMap"), "src/app.js is missing the official Google My Map loader.");
+assert(appSource.includes("loadWaterData"), "src/app.js is missing the generated water-edge loader.");
+assert(appSource.includes("clipWaterDataToGameBoundary"), "src/app.js must clip water geometry to the official Game Area before use.");
+assert(!appSource.includes("BUILT_IN_WATER_DATA"), "src/app.js must not use the retired hand-drawn water atlas.");
 assert(appSource.includes("window.__HIDELINE_LOADED_VERSION__ = APP_VERSION"), "src/app.js is missing the deployment-version handshake.");
 
 if (failures.length) {
@@ -68,4 +85,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`Validated repository layout for HideLine ${APP_VERSION}: entry page, versioned assets, notification/location modules and nested folder structure are intact.`);
+console.log(`Validated repository layout for HideLine ${APP_VERSION}: versioned assets, authoritative map-data generation, water/station loaders and nested source folders are intact.`);

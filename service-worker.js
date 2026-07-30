@@ -1,5 +1,5 @@
-const CACHE_VERSION = "hideline-shell-v2.3.3";
-const RUNTIME_CACHE = "hideline-runtime-v2.3.3";
+const CACHE_VERSION = "hideline-shell-v2.3.4";
+const RUNTIME_CACHE = "hideline-runtime-v2.3.4";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -11,8 +11,8 @@ const APP_SHELL = [
   "./assets/icon-512.png",
   "./assets/icon-maskable-512.png",
   "./assets/apple-touch-icon.png",
-  "./src/styles.css?v=2.3.3",
-  "./src/app.js?v=2.3.3",
+  "./src/styles.css?v=2.3.4",
+  "./src/app.js?v=2.3.4",
   "./src/core/constants.js",
   "./src/core/format.js",
   "./src/core/time.js",
@@ -23,13 +23,13 @@ const APP_SHELL = [
   "./src/core/question-location.js",
   "./src/core/deduction.js",
   "./src/core/spatial.js",
+  "./src/core/station-authority.js",
   "./src/data/stations.js",
   "./src/data/questions.js",
   "./src/data/question-deduction.js",
   "./src/data/rules.js",
   "./src/data/boundary.js",
   "./src/data/thames-centreline.js",
-  "./src/data/water-edges.js",
   "./src/data/station-geo.js",
   "./src/services/geolocation.js",
   "./src/services/tfl.js",
@@ -38,6 +38,7 @@ const APP_SHELL = [
   "./src/services/map.js",
   "./src/services/reference-data.js",
   "./src/services/spatial-data.js",
+  "./src/services/water-data.js",
   "./src/services/stations.js",
   "./src/services/supabase.js",
   "./src/ui/icons.js",
@@ -115,6 +116,7 @@ self.addEventListener("fetch", (event) => {
     url.pathname.endsWith("/config.js") ||
     url.pathname.endsWith("/manifest.webmanifest") ||
     url.pathname.includes("/src/") ||
+    url.pathname.includes("/data/") ||
     url.pathname.endsWith(".js") ||
     url.pathname.endsWith(".css");
 

@@ -393,7 +393,7 @@ export async function renderCoordinatePickerMap({
     L = await loadLeaflet();
   } catch (error) {
     const message = origin
-      ? "Online map tiles are unavailable. The built-in water-edge atlas is shown in simplified vector form; tap an edge and confirm below."
+      ? "Online map tiles are unavailable. The deployed OpenStreetMap water-edge snapshot is shown in simplified vector form; tap an edge and confirm below."
       : error.message;
     return renderCoordinatePickerFallback(container, point, onChange, message, origin, referenceFeatures);
   }
@@ -496,6 +496,7 @@ function stationPopup(result) {
       <strong>${escapeMapText(result.name)}</strong>
       <span>${escapeMapText(statusDescription(result))}</span>
       <small>${escapeMapText(resultReason(result))}</small>
+      <small class="map-centre-source">Circle centre: ${escapeMapText(result.coordinateSourceLabel || result.source || "embedded fallback")}</small>
       <div class="map-popup-actions">
         <button type="button" data-action="deduction-toggle-priority" data-id="${escapeMapText(result.id)}" ${result.possible ? "" : "disabled"}>${result.priority ? "Unstar" : "Priority"}</button>
         <button type="button" data-action="deduction-toggle-eliminated" data-id="${escapeMapText(result.id)}">${manualEliminated ? "Restore manual" : "Eliminate"}</button>

@@ -32,6 +32,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Restore last verified map snapshots
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: hideline-map-data-${{ github.run_id }}
+          restore-keys: |
+            hideline-map-data-
+      - name: Build official map and water snapshots
+        run: node scripts/fetch-authoritative-map-data.mjs --strict
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

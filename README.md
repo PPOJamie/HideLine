@@ -1,19 +1,25 @@
 # HideLine — London Hide + Seek Companion
 
-HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.3.3 makes the Body of Water workflow game-day ready with an always-visible mobile confirmation bar and a bundled Central London water-edge atlas that powers both teams' calculations and the Find Hiders map.
+HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.3.4 replaces the hand-drawn water atlas and fallback-first station centres with deployment-generated map data: the supplied Google My Map provides the exact Game Area polygon and Hiding Stations pins, while named OpenStreetMap bank and shoreline geometry powers Body of Water calculations.
 
 ![Simple HideLine game screen](assets/screenshot-simple-desktop.png)
 
 ![Simple HideLine deduction map on mobile](assets/screenshot-simple-mobile.png)
 
-## What is new in 2.3.3
+## What is new in 2.3.4
 
-- **The map no longer blocks confirmation:** the water picker is split into a scrollable map area and a separate footer. **Use this water edge**, **Cancel** and the selected coordinates remain visible below the map on phones, including small screens and installed PWAs.
-- **Automatic nearest-edge selection:** after a player chooses their location, HideLine immediately finds the nearest valid bank or shoreline. The map is now a review step, not a compulsory manual measurement step.
-- **Built-in water-edge atlas:** 36 major named rivers, canals, docks, basins and park lakes across the game area are bundled with the app as line or polygon geometry. This includes the River Thames, Regent's Canal, Canada Water lake, the Serpentine and the main Surrey Docks waters.
-- **Find Hiders shading works without an import:** Body of Water answers now compare each sampled candidate point with its own nearest built-in named water edge. The question no longer stays unresolved merely because Google My Maps did not contain water polygons.
-- **Safer imported data:** a same-named station pin or water POI cannot overwrite a usable built-in shoreline. Swimming pools, fountains and point placemarks remain excluded.
-- **Manual review remains available:** tap another blue edge when the automatic choice is wrong. Tiny or omitted waters can still be entered manually, but the bundled atlas is used by default for consistent game-day deductions.
+- **Official circle centres:** every 500 m hiding circle is centred on the corresponding point in the supplied Google My Maps **Hiding Stations** layer. Embedded station coordinates are used only when an official point cannot be matched, and the Map Data panel identifies any fallback immediately.
+- **No silent circle shift:** version 2.3.3 did not modify the embedded station-coordinate file. Version 2.3.4 changes the source of truth instead: official map pins override those older fallback coordinates at runtime.
+- **Real water geometry:** the hand-drawn 36-feature atlas is no longer loaded. GitHub Pages generates a named OpenStreetMap water-edge snapshot during deployment from mapped banks, shorelines, docks, basins, canals, lakes and rivers.
+- **Game-area clipping:** water geometry is clipped to the exact red Game Area polygon before the question calculator or Find Hiders map can use it. Water beyond the official boundary is ignored, matching the handbook rule for out-of-area features.
+- **Deployment validation:** publishing is stopped when the official KML is missing the boundary or any handbook station pin. A cache retains the last verified map snapshots if a live source has a temporary outage.
+- **Visible diagnostics:** **Map → Find Hiders → Map data and reset** reports the number of official station pins, exact boundary status, source water features and water edges remaining inside the Game Area.
+- **Water-question preflight:** opening Measuring → Body of Water waits for the official Game Area and water geometry to load before showing the calculator.
+
+## What was added in 2.3.3
+
+- The mobile water picker keeps its confirmation controls beneath the map.
+- Automatic nearest-edge selection remains available, but its source is now the deployment-generated water snapshot rather than the retired hand-drawn atlas.
 
 ## What changed in 2.3.2
 
@@ -133,7 +139,7 @@ window.HIDELINE_CONFIG = {
 };
 ```
 
-HideLine 2.3.3 requires **no new Supabase migration**. The built-in water atlas, mobile picker fix, water-feature filtering and administrative-boundary fixes are client-side, as were the 2.3.0 timer, form-draft, answer-view and POI changes. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
+HideLine 2.3.4 requires **no new Supabase migration**. Official station-pin selection, deployment-generated water geometry, Game Area clipping and the earlier water, timer, form-draft, answer-view and POI fixes are client-side. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
 
 ## Privacy model
 
@@ -147,7 +153,7 @@ Read [`PRIVACY.md`](PRIVACY.md) before operating a public deployment.
 
 ## Map accuracy
 
-The Google My Map remains the authoritative Game Area, station and curated-POI reference. HideLine draws it in red only when that exact polygon has loaded; the amber line is explicitly a fallback guide. OpenStreetMap supplies the visible street and river-bank basemap. Official GLA/ONS services supply the administrative polygons used for borough, ward and constituency questions. HideLine's remapped Thames guide, built-in water-edge atlas, deduction grid, station centres, 500 m circles and offline vector map are planning aids rather than surveyed boundaries. Use normal player judgement for bridges, tunnels, islands, foreshore, borderline paths and source-layer disputes.
+The supplied Google My Map is the authoritative Game Area, Hiding Station and curated-POI reference. HideLine draws the boundary in solid red only after that exact polygon loads and centres each 500 m circle on the matching point in the map's Hiding Stations layer. An amber boundary or a station popup labelled **Embedded fallback** means the authoritative geometry is not yet ready. OpenStreetMap provides the visible basemap and the named bank/shoreline snapshot used for Body of Water calculations; HideLine clips those water edges to the official Game Area before use. Official ONS services supply borough, ward and constituency polygons. The deduction grid and offline renderer remain planning tools, so players should use the supplied map and normal judgement for bridges, tunnels, islands, foreshore and borderline paths.
 
 ## Important safeguards
 
@@ -164,6 +170,7 @@ The Google My Map remains the authoritative Game Area, station and curated-POI r
 .
 ├── .github/workflows/pages.yml      # tests and GitHub Pages deployment
 ├── assets/                           # icons and install screenshots
+├── data/                             # deployment-generated official KML and water snapshots
 ├── docs/                             # handbook and architecture notes
 ├── scripts/                          # local server and data validation
 ├── src/

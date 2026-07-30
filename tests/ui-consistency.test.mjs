@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { APP_VERSION } from "../src/core/constants.js";
 
 const playSource = await readFile(new URL("../src/ui/play.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -26,7 +27,7 @@ test("legacy Game markup remains readable during a mixed-cache PWA upgrade", () 
   }
 });
 
-test("the 2.3.3 service worker precaches the Game renderer in a new shell", () => {
-  assert.match(serviceWorker, /hideline-shell-v2\.3\.3/);
+test("the current service worker precaches the Game renderer in a versioned shell", () => {
+  assert.ok(serviceWorker.includes(`hideline-shell-v${APP_VERSION}`));
   assert.match(serviceWorker, /"\.\/src\/ui\/play\.js"/);
 });

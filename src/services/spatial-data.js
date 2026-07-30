@@ -3,6 +3,7 @@ import { inferSpatialCategory, normaliseSpatialData, normaliseSpatialFeature, sp
 
 const MAX_FEATURES = 12_000;
 const MAX_POINTS_PER_PATH = 750;
+const BUNDLED_GAME_MAP_URL = new URL("../../data/official-game-map.kml", import.meta.url);
 
 function textDecoder() {
   return new TextDecoder("utf-8");
@@ -227,6 +228,17 @@ export async function parseSpatialDataFile(file) {
   if (extension === "kml" || /^\s*</.test(text)) return parseKmlText(text, name);
   if (["geojson", "json"].includes(extension) || /^\s*[\[{]/.test(text)) return parseGeoJsonText(text, name);
   throw new Error("Unsupported map-data file. Use KML, KMZ, GeoJSON or JSON.");
+}
+
+
+export async function fetchBundledSpatialData({ force = false } = {}) {
+  const response = await fetch(BUNDLED_GAME_MAP_URL, {
+    cache: force ? "reload" : "no-cache",
+    credentials: "same-origin"
+  });
+  if (!response.ok) throw new Error(`Bundled official game map returned HTTP ${response.status}.`);
+  const text = await response.text();
+  return parseKmlText(text, "Bundled official Google My Map snapshot");
 }
 
 export async function fetchConfiguredSpatialData() {

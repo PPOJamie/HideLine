@@ -169,7 +169,9 @@ export function normaliseSpatialFeature(feature, index = 0) {
     source: String(properties.source || feature.source || "imported"),
     properties: {
       description: String(properties.description || "").slice(0, 500),
-      originalId: properties.originalId || null
+      originalId: properties.originalId || null,
+      quality: properties.quality || null,
+      osmElements: properties.osmElements || null
     }
   };
 }
@@ -186,7 +188,7 @@ export function normaliseSpatialData(value = {}) {
   };
 }
 
-/** Merge imported game-map data with built-in reference layers. Later datasets
+/** Merge authoritative and imported game-map reference layers. Later datasets
  * take precedence when the same named feature appears more than once. */
 export function mergeSpatialData(...values) {
   const merged = new Map();
@@ -197,9 +199,18 @@ export function mergeSpatialData(...values) {
     if (data.sourceName && data.sourceName !== "No map data imported") sources.push(data.sourceName);
     if (data.importedAt && (!importedAt || new Date(data.importedAt) > new Date(importedAt))) importedAt = data.importedAt;
     for (const feature of data.features) {
-      const key = `${feature.category}:${normaliseSpatialName(feature.name) || feature.id}`;
+      const pointCoordinates = feature.category === "station" && feature.geometry?.type === "Point"
+        ? (feature.geometry.coordinates || []).slice(0, 2).map((value) => Number(value).toFixed(6)).join(",")
+        : "";
+      // Several valid handbook entries deliberately share the same display
+      // name (Brixton, Shadwell, Edgware Road and Elephant & Castle). Preserve
+      // distinct station pins by coordinate rather than collapsing them under
+      // one normalised name.
+      const key = pointCoordinates
+        ? `${feature.category}:${normaliseSpatialName(feature.name) || "station"}:${pointCoordinates}`
+        : `${feature.category}:${normaliseSpatialName(feature.name) || feature.id}`;
       const existing = merged.get(key);
-      // Preserve a usable built-in water line or polygon when a later import
+      // Preserve a usable water line or polygon when a later import
       // contains only a same-named point placemark. A point such as a map pin
       // cannot represent the shoreline required by the handbook and must not
       // disable Find Hiders water shading.
@@ -332,6 +343,167 @@ export function geometryContainsPoint(geometry, point) {
   if (geometry.type === "MultiPolygon") return (geometry.coordinates || []).some((polygon) => pointInPolygonCoordinates(point, polygon));
   if (geometry.type === "GeometryCollection") return (geometry.geometries || []).some((child) => geometryContainsPoint(child, point));
   return false;
+}
+
+
+function coordinateAlmostEqual(a, b, tolerance = 1e-9) {
+  return Boolean(a && b && Math.abs(Number(a[0]) - Number(b[0])) <= tolerance && Math.abs(Number(a[1]) - Number(b[1])) <= tolerance);
+}
+
+function interpolateCoordinate(start, end, t) {
+  return [
+    Number(start[0]) + (Number(end[0]) - Number(start[0])) * Number(t),
+    Number(start[1]) + (Number(end[1]) - Number(start[1])) * Number(t)
+  ];
+}
+
+function cross2d(a, b) {
+  return Number(a[0]) * Number(b[1]) - Number(a[1]) * Number(b[0]);
+}
+
+function segmentIntersectionParameter(start, end, edgeStart, edgeEnd) {
+  const r = [Number(end[0]) - Number(start[0]), Number(end[1]) - Number(start[1])];
+  const q = [Number(edgeStart[0]) - Number(start[0]), Number(edgeStart[1]) - Number(start[1])];
+  const edge = [Number(edgeEnd[0]) - Number(edgeStart[0]), Number(edgeEnd[1]) - Number(edgeStart[1])];
+  const denominator = cross2d(r, edge);
+  if (Math.abs(denominator) < 1e-14) return null;
+  const t = cross2d(q, edge) / denominator;
+  const u = cross2d(q, r) / denominator;
+  if (t < -1e-10 || t > 1 + 1e-10 || u < -1e-10 || u > 1 + 1e-10) return null;
+  return Math.max(0, Math.min(1, t));
+}
+
+function boundaryPolygons(boundaryFeatures = []) {
+  const polygons = [];
+  for (const feature of boundaryFeatures || []) {
+    const geometry = feature?.geometry || feature;
+    if (geometry?.type === "Polygon") polygons.push(geometry.coordinates || []);
+    if (geometry?.type === "MultiPolygon") polygons.push(...(geometry.coordinates || []));
+  }
+  return polygons.filter((polygon) => polygon?.[0]?.length >= 3);
+}
+
+function polygonRings(polygons = []) {
+  return polygons.flatMap((polygon) => polygon || []);
+}
+
+function pointInsideBoundaryPolygons(coordinate, polygons = []) {
+  const point = { lng: Number(coordinate[0]), lat: Number(coordinate[1]) };
+  return polygons.some((polygon) => pointInPolygonCoordinates(point, polygon));
+}
+
+function segmentIntervalsInsideBoundaries(start, end, polygons = [], rings = []) {
+  const values = [0, 1];
+  for (const ring of rings) {
+    for (let index = 0; index < ring.length; index += 1) {
+      const edgeStart = ring[index];
+      const edgeEnd = ring[(index + 1) % ring.length];
+      if (!edgeStart || !edgeEnd || coordinateAlmostEqual(edgeStart, edgeEnd)) continue;
+      const t = segmentIntersectionParameter(start, end, edgeStart, edgeEnd);
+      if (t != null) values.push(t);
+    }
+  }
+  values.sort((a, b) => a - b);
+  const unique = values.filter((value, index) => index === 0 || Math.abs(value - values[index - 1]) > 1e-9);
+  const intervals = [];
+  for (let index = 0; index < unique.length - 1; index += 1) {
+    const from = unique[index];
+    const to = unique[index + 1];
+    if (to - from <= 1e-10) continue;
+    const midpoint = interpolateCoordinate(start, end, (from + to) / 2);
+    if (pointInsideBoundaryPolygons(midpoint, polygons)) intervals.push([from, to]);
+  }
+  return intervals;
+}
+
+/**
+ * Clip one LineString to the union of the supplied game-boundary polygons.
+ * The interval-midpoint method works for concave polygons and holes and keeps
+ * only shoreline segments that legally exist inside the game area.
+ */
+export function clipLineCoordinatesToBoundaries(line = [], boundaryFeatures = []) {
+  const coordinates = (line || []).filter((coordinate) => Array.isArray(coordinate) && Number.isFinite(Number(coordinate[0])) && Number.isFinite(Number(coordinate[1])));
+  const polygons = boundaryPolygons(boundaryFeatures);
+  if (coordinates.length < 2 || !polygons.length) return [];
+  const rings = polygonRings(polygons);
+  const parts = [];
+  let current = null;
+  for (let index = 0; index < coordinates.length - 1; index += 1) {
+    const start = coordinates[index];
+    const end = coordinates[index + 1];
+    const intervals = segmentIntervalsInsideBoundaries(start, end, polygons, rings);
+    for (const [from, to] of intervals) {
+      const clippedStart = interpolateCoordinate(start, end, from);
+      const clippedEnd = interpolateCoordinate(start, end, to);
+      if (!current || !coordinateAlmostEqual(current.at(-1), clippedStart)) {
+        if (current?.length >= 2) parts.push(current);
+        current = [clippedStart, clippedEnd];
+      } else if (!coordinateAlmostEqual(current.at(-1), clippedEnd)) {
+        current.push(clippedEnd);
+      }
+    }
+    if (!intervals.length && current?.length >= 2) {
+      parts.push(current);
+      current = null;
+    }
+  }
+  if (current?.length >= 2) parts.push(current);
+  return parts;
+}
+
+export function clipLineFeatureToBoundaries(feature, boundaryFeatures = []) {
+  if (!feature?.geometry || !["LineString", "MultiLineString"].includes(feature.geometry.type)) return null;
+  const sourceLines = feature.geometry.type === "LineString" ? [feature.geometry.coordinates || []] : feature.geometry.coordinates || [];
+  const clippedLines = sourceLines.flatMap((line) => clipLineCoordinatesToBoundaries(line, boundaryFeatures));
+  if (!clippedLines.length) return null;
+  return normaliseSpatialFeature({
+    ...feature,
+    geometry: clippedLines.length === 1
+      ? { type: "LineString", coordinates: clippedLines[0] }
+      : { type: "MultiLineString", coordinates: clippedLines },
+    properties: {
+      ...(feature.properties || {}),
+      name: feature.name,
+      category: feature.category,
+      layer: feature.layer,
+      source: feature.source,
+      description: `${feature.properties?.description || ""}${feature.properties?.description ? " " : ""}Clipped to the official game-area boundary.`,
+      quality: feature.properties?.quality || null,
+      osmElements: feature.properties?.osmElements || null
+    }
+  });
+}
+
+/**
+ * Body-of-Water rules ignore features outside the Game Area. This creates the
+ * effective water dataset used by both the seeker/hider calculators and Find
+ * Hiders, clipped to the supplied official game-boundary polygon.
+ */
+export function clipWaterDataToGameBoundary(waterData = {}, boundaryFeatures = []) {
+  const boundaries = (boundaryFeatures || []).filter((feature) => feature?.category === "game_boundary" && ["Polygon", "MultiPolygon"].includes(feature.geometry?.type));
+  const source = usableWaterFeatures(normaliseSpatialData(waterData).features);
+  if (!boundaries.length) {
+    return {
+      ...waterData,
+      sourceName: waterData?.sourceName || "OpenStreetMap named water edges",
+      features: [],
+      clippedToGameBoundary: false,
+      sourceFeatureCount: source.length,
+      clipReason: "The official game-area boundary has not loaded."
+    };
+  }
+  const features = source.map((feature) => clipLineFeatureToBoundaries(feature, boundaries)).filter(Boolean);
+  return {
+    ...waterData,
+    sourceName: waterData?.sourceName || "OpenStreetMap named water edges",
+    features,
+    clippedToGameBoundary: true,
+    sourceFeatureCount: source.length,
+    excludedOutsideGameAreaCount: Math.max(0, source.length - features.length),
+    gameBoundaryFeatureCount: boundaries.length,
+    gameBoundarySource: boundaries[0]?.source || "Imported game boundary",
+    clipReason: null
+  };
 }
 
 function polygonBoundaryDistance(point, polygon = []) {

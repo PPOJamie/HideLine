@@ -2,6 +2,20 @@
 
 All notable changes to HideLine are documented here.
 
+## 2.3.4 — Official circle centres and mapped water boundaries
+
+- Replaced the active hand-drawn water atlas with deployment-generated named OpenStreetMap bank and shoreline geometry.
+- Replaced the old atlas module with empty compatibility exports so a mixed-cache PWA cannot silently reuse the inaccurate shapes.
+- Clipped every water feature to the exact Google My Maps Game Area polygon before Body of Water calculation or Find Hiders shading; out-of-area water is now ignored.
+- Made the supplied Google My Maps **Hiding Stations** points the runtime source of truth for every 500 m circle centre, with embedded coordinates retained only as explicit fallbacks.
+- Added duplicate-station matching for Brixton, Shadwell, Edgware Road and Elephant & Castle, plus source priority so a manual same-name point cannot displace an official game-map pin.
+- Added deployment validation that requires the official boundary and all 100 handbook station pins before publishing.
+- Added a Pages cache for the last verified KML and water snapshots, reducing the risk of a temporary source outage blocking a later deployment.
+- Added Map Data diagnostics for official pin count, source water count, in-area clipped water count and fallback station names.
+- Made the Body of Water question pre-load the official boundary and water data before opening its calculator.
+- Confirmed that the embedded station-coordinate file did not change between versions 2.3.2 and 2.3.3; apparent offsets came from fallback centres rather than a deliberate circle shift.
+- Expanded the regression suite to 85 checks. No Supabase migration is required.
+
 ## 2.3.3 — Built-in water atlas and mobile picker repair
 
 - Moved the coordinate-picker confirmation controls into a separate always-visible footer so the Leaflet map can no longer trap the page above **Use this water edge** on mobile.

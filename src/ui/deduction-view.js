@@ -13,9 +13,8 @@ import {
   isMaskConstraint,
   normaliseDeductionRoundState
 } from "../core/deduction.js";
-import { mergeSpatialData, normaliseSpatialData, spatialCategoryLabel, spatialDataStats } from "../core/spatial.js";
-import { STATION_GEO_BY_ID } from "../data/station-geo.js";
-import { BUILT_IN_WATER_DATA } from "../data/water-edges.js";
+import { clipWaterDataToGameBoundary, mergeSpatialData, normaliseSpatialData, spatialCategoryLabel, spatialDataStats } from "../core/spatial.js";
+import { resolveAuthoritativeStations } from "../core/station-authority.js";
 import { STATIONS, STATION_BY_ID, stationNameLength } from "../data/stations.js";
 import { icon } from "./icons.js";
 
@@ -32,7 +31,15 @@ export function buildDeductionViewModel(state) {
   }
 
   const importedSpatialData = normaliseSpatialData(state.privateTeamState?.spatialData);
-  const spatialData = mergeSpatialData(BUILT_IN_WATER_DATA, importedSpatialData, state.referenceData);
+  const officialBoundaries = (state.officialMapData?.features || []).filter((feature) => feature?.category === "game_boundary");
+  const clippingBoundaries = officialBoundaries.length
+    ? officialBoundaries
+    : importedSpatialData.features.filter((feature) => feature?.category === "game_boundary");
+  const effectiveWaterData = clipWaterDataToGameBoundary(
+    state.waterData,
+    clippingBoundaries
+  );
+  const spatialData = mergeSpatialData(importedSpatialData, state.referenceData, effectiveWaterData, state.officialMapData);
   const allAutomatic = deriveAutomaticConstraints({
     questions: state.questions,
     team: state.profile.team,
@@ -43,7 +50,8 @@ export function buildDeductionViewModel(state) {
   const automatic = allAutomatic.filter((constraint) => !ignored.has(constraint.id));
   const manual = (roundState.constraints || []).filter((constraint) => constraint?.enabled !== false);
   const constraints = [...automatic, ...manual];
-  const mergedStations = STATIONS.map((station) => ({ ...station, ...(STATION_GEO_BY_ID.get(station.id) || {}) }));
+  const stationAuthority = resolveAuthoritativeStations(STATIONS, spatialData.features);
+  const mergedStations = stationAuthority.stations;
   const results = evaluateStationPossibilities({
     stations: mergedStations,
     constraints,
@@ -65,6 +73,7 @@ export function buildDeductionViewModel(state) {
       constraints,
       mode: "endgame",
       spatialFeatures: spatialData.features,
+      stationGeos: mergedStations,
       cellSizeMetres: 25
     })
     : null;
@@ -74,16 +83,20 @@ export function buildDeductionViewModel(state) {
       constraints,
       mode: "history",
       spatialFeatures: spatialData.features,
+      stationGeos: mergedStations,
       cellSizeMetres: 25
     })
     : null;
-  const resolutions = new Map(constraints.map((constraint) => [constraint.id, constraintResolution(constraint, { spatialFeatures: spatialData.features })]));
+  const resolutions = new Map(constraints.map((constraint) => [constraint.id, constraintResolution(constraint, { spatialFeatures: spatialData.features, stationGeos: mergedStations })]));
   return {
     round,
     roundState,
     spatialData,
     importedSpatialData,
     referenceData: state.referenceData || { status: "idle", features: [], sources: [] },
+    officialMapData: state.officialMapData || { status: "idle", features: [] },
+    waterData: effectiveWaterData,
+    stationAuthority: stationAuthority.diagnostics,
     spatialStats: spatialDataStats(spatialData),
     allAutomatic,
     automatic,
@@ -230,20 +243,40 @@ function renderMapSetup(model) {
   const stats = model.spatialStats;
   const importedCount = model.importedSpatialData?.features?.length || 0;
   const reference = model.referenceData || {};
+  const official = model.officialMapData || {};
+  const water = model.waterData || {};
   const adminCount = reference.features?.length || 0;
-  const boundaryCount = model.spatialData.features.filter((feature) => feature.category === "game_boundary").length;
+  const officialFeatureCount = official.features?.length || 0;
+  const officialBoundaryCount = (official.features || []).filter((feature) => feature.category === "game_boundary").length;
+  const waterFeatures = (water.features || []).filter((feature) => feature.category === "water");
+  const waterCount = waterFeatures.length;
+  const sourceWaterCount = Number.isFinite(Number(water.sourceFeatureCount)) ? Number(water.sourceFeatureCount) : waterCount;
+  const exactWaterCount = waterFeatures.filter((feature) => feature.properties?.quality === "mapped-edge").length;
+  const derivedWaterCount = waterFeatures.filter((feature) => feature.properties?.quality === "width-derived-fallback").length;
+  const stationAuthority = model.stationAuthority || {};
   const boundarySourceStatus = (reference.sources || []).length
     ? `<div class="boundary-source-list">${reference.sources.map((source) => `<span class="boundary-source-status status-${source.status === "ready" ? "ready" : "error"}"><strong>${escapeHtml(source.label)}</strong><small>${source.status === "ready" ? `${source.count} polygons ready${source.format ? ` · ${escapeHtml(source.format)}` : ""}` : "Unavailable"}</small></span>`).join("")}</div>`
     : "";
+  const mapReady = official.status === "ready" && officialBoundaryCount && stationAuthority.matchedCount;
+  const waterReady = water.status === "ready" && water.clippedToGameBoundary && waterCount;
   return `<details class="card card-pad simple-expander map-setup">
-    <summary><span>${icon("settings")}<span><strong>Map data and reset</strong><small>${stats.total} usable features · ${adminCount} official boundaries</small></span></span>${icon("chevron")}</summary>
+    <summary><span>${icon("settings")}<span><strong>Map data and reset</strong><small>${stationAuthority.matchedCount || 0}/100 official station pins · ${waterCount} in-area water edges</small></span></span>${icon("chevron")}</summary>
     <div class="simple-expander-body stack">
-      <div class="map-data-status-grid"><div><span>Official administration layers</span><strong>${reference.status === "loading" ? "Loading…" : adminCount ? `${adminCount} ready` : "Unavailable"}</strong><small>London boroughs, electoral wards and parliamentary constituencies use fixed official ONS FeatureServer layers.</small></div><div><span>Game map</span><strong>${importedCount ? `${importedCount} features` : "Not imported"}</strong><small>${boundaryCount ? "Official red game boundary is active." : "The app will try to load the supplied map automatically. Import its KML/KMZ if Google blocks the download; this activates the exact red boundary and curated POIs."}</small></div></div>
+      <div class="map-data-status-grid">
+        <div><span>Official game map</span><strong>${official.status === "loading" ? "Loading…" : mapReady ? "Ready" : "Needs attention"}</strong><small>${officialFeatureCount ? `${officialFeatureCount} features · ${stationAuthority.matchedCount || 0} station circles use official pins${officialBoundaryCount ? " · exact red boundary active" : ""}.` : "HideLine has not loaded the deployed Google My Maps snapshot yet."}</small></div>
+        <div><span>Named water edges</span><strong>${water.status === "loading" ? "Loading…" : waterReady ? `${waterCount} in game area` : water.status === "ready" && !water.clippedToGameBoundary ? "Waiting for boundary" : "Unavailable"}</strong><small>${waterReady ? `${sourceWaterCount} source feature${sourceWaterCount === 1 ? "" : "s"} checked · ${exactWaterCount} mapped bank/shoreline feature${exactWaterCount === 1 ? "" : "s"} remain after clipping to ${escapeHtml(water.gameBoundarySource || "the official red boundary")}${derivedWaterCount ? ` · ${derivedWaterCount} width-derived fallback${derivedWaterCount === 1 ? "" : "s"}` : ""}.` : water.clipReason ? escapeHtml(water.clipReason) : "Body of Water shading is disabled until real line or polygon geometry loads."}</small></div>
+        <div><span>Official administration layers</span><strong>${reference.status === "loading" ? "Loading…" : adminCount ? `${adminCount} ready` : "Unavailable"}</strong><small>London boroughs, electoral wards and parliamentary constituencies use fixed official boundary services.</small></div>
+        <div><span>Manual imported map</span><strong>${importedCount ? `${importedCount} features` : "None"}</strong><small>An imported KML/KMZ can supplement missing POIs and remains private to the seeker team. The supplied official boundary and Hiding Stations pins keep priority.</small></div>
+      </div>
       ${boundarySourceStatus}
+      ${official.error ? `<div class="callout warning">${icon("alert")}<p><strong>Official game map:</strong> ${escapeHtml(official.error)}</p></div>` : ""}
+      ${water.error ? `<div class="callout warning">${icon("alert")}<p><strong>Water edges:</strong> ${escapeHtml(water.error)}</p></div>` : ""}
+      ${water.status === "ready" && !water.clippedToGameBoundary ? `<div class="callout warning">${icon("alert")}<p><strong>Water calculations are waiting for the official red Game Area boundary.</strong> HideLine deliberately excludes all water until it can enforce the handbook rule that features outside the Game Area do not exist for Matching and Measuring.</p></div>` : ""}
       ${reference.error ? `<div class="callout warning">${icon("alert")}<p>${escapeHtml(reference.error)}</p></div>` : ""}
-      <div class="row wrap"><button class="button button-soft button-small" type="button" data-action="reference-data-refresh">${icon("refresh")} Clear cache and retry boundaries</button></div>
-      <form class="stack" data-form="spatial-data-import"><div class="field"><label for="spatial-data-file">Game map KML, KMZ or GeoJSON</label><input id="spatial-data-file" name="spatialDataFile" type="file" accept=".kml,.kmz,.geojson,.json,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" required /></div><div class="row wrap"><button class="button button-primary button-small" type="submit">${icon("uploadCloud")} Import game map</button><button class="button button-soft button-small" type="button" data-action="spatial-data-load-configured">${icon("download")} Load official game map</button>${importedCount ? `<button class="button button-soft button-small" type="button" data-action="spatial-data-clear">Clear imported game map</button>` : ""}</div></form>
-      <div class="callout">${icon("info")}<p>The exact ONS service URLs, layer fields and London filters are built into HideLine. Valid polygons are cached after the first load, and the loader automatically falls back from GeoJSON to ArcGIS JSON. Curated parks, museums, hospitals, cinemas, libraries, zoos, consulates and named bodies of water still come from the supplied Google My Map.</p></div>
+      ${stationAuthority.fallbackCount ? `<div class="callout warning">${icon("alert")}<p><strong>${stationAuthority.fallbackCount} station circle${stationAuthority.fallbackCount === 1 ? "" : "s"} still use fallback coordinates.</strong> Refresh or import the official KML before relying on borderline circle positions.${stationAuthority.unmatchedStationIds?.length ? ` Unmatched: ${escapeHtml(stationAuthority.unmatchedStationIds.slice(0, 12).map((id) => STATION_BY_ID.get(id)?.name || id).join(", "))}${stationAuthority.unmatchedStationIds.length > 12 ? "…" : ""}.` : ""}</p></div>` : `<div class="callout success">${icon("check")}<p><strong>All 100 hiding circles are centred on the supplied game-map station pins.</strong>${Number.isFinite(stationAuthority.maximumFallbackOffsetMetres) ? ` The largest correction from the old fallback centres was ${Math.round(stationAuthority.maximumFallbackOffsetMetres)} m.` : ""}</p></div>`}
+      <div class="row wrap"><button class="button button-soft button-small" type="button" data-action="official-map-refresh">${icon("refresh")} Refresh official game map</button><button class="button button-soft button-small" type="button" data-action="water-data-refresh">${icon("refresh")} Refresh water geometry</button><button class="button button-soft button-small" type="button" data-action="reference-data-refresh">${icon("refresh")} Retry administrative boundaries</button></div>
+      <form class="stack" data-form="spatial-data-import"><div class="field"><label for="spatial-data-file">Updated game map KML, KMZ or GeoJSON</label><input id="spatial-data-file" name="spatialDataFile" type="file" accept=".kml,.kmz,.geojson,.json,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" required /></div><div class="row wrap"><button class="button button-primary button-small" type="submit">${icon("uploadCloud")} Import updated map</button>${importedCount ? `<button class="button button-soft button-small" type="button" data-action="spatial-data-clear">Clear manual import</button>` : ""}</div></form>
+      <div class="callout">${icon("info")}<p>The red boundary and 500 m circle centres now come from the supplied Google My Map. Body of Water calculations use named OpenStreetMap water-edge geometry that is generated during deployment and cached for game day. The old hand-drawn water atlas is no longer used.</p></div>
       <div class="divider"></div><button class="button button-danger button-small" type="button" data-action="deduction-reset">${icon("refresh")} Reset this round's deductions</button>
     </div>
   </details>`;

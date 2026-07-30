@@ -18,18 +18,19 @@ import {
 import { QUESTION_BY_ID, repeatedReward } from "./data/questions.js";
 import { questionDeductionConfig } from "./data/question-deduction.js";
 import { STATIONS, STATION_BY_ID, stationNameLength } from "./data/stations.js";
-import { STATION_GEO_BY_ID } from "./data/station-geo.js";
+import { resolveAuthoritativeStations } from "./core/station-authority.js";
 import { LONDON_MAP_CENTRE } from "./data/boundary.js";
-import { BUILT_IN_WATER_DATA } from "./data/water-edges.js";
 import { SupabaseSync } from "./services/supabase.js";
 import { LocationService } from "./services/geolocation.js";
 import { compressImage } from "./services/media.js";
 import { clearEvidenceStore, getLocalEvidenceUrl, saveLocalEvidence } from "./services/evidence.js";
 import { fetchTflStatus } from "./services/tfl.js";
-import { fetchConfiguredSpatialData, parseSpatialDataFile } from "./services/spatial-data.js";
+import { fetchBundledSpatialData, fetchConfiguredSpatialData, parseSpatialDataFile } from "./services/spatial-data.js";
 import { clearOfficialBoundaryCache, loadOfficialBoundaryData } from "./services/reference-data.js";
+import { loadAuthoritativeWaterData } from "./services/water-data.js";
 import {
   bodyOfWaterDistanceResult,
+  clipWaterDataToGameBoundary,
   compactGeometry,
   containingFeature,
   featureAnchorPoint,
@@ -113,7 +114,8 @@ class HideLineApp {
     await this.autoConnect();
     this.syncPendingQuestionNotifications();
     this.loadReferenceData().catch((error) => console.warn("Official boundary data could not be loaded", error));
-    this.ensureConfiguredGameMapData().catch((error) => console.warn("Configured game map could not be loaded automatically", error));
+    this.loadOfficialGameMap().catch((error) => console.warn("Official game map could not be loaded automatically", error));
+    this.loadWaterData().catch((error) => console.warn("Named water geometry could not be loaded automatically", error));
     const joinCode = new URLSearchParams(location.search).get("join");
     if (joinCode && !this.store.get().game) this.openModal("join-game");
   }
@@ -813,11 +815,13 @@ class HideLineApp {
         case "deduction-undo": await this.undoDeduction(); break;
         case "deduction-reset": await this.resetDeductionRound(); break;
         case "spatial-data-load-configured": await this.loadConfiguredSpatialData(button); break;
+        case "official-map-refresh": await this.loadOfficialGameMap({ force: true, announce: true }); break;
+        case "water-data-refresh": await this.loadWaterData({ force: true, announce: true }); break;
         case "spatial-data-clear": await this.clearSpatialData(); break;
         case "reference-data-refresh": await this.loadReferenceData({ force: true, announce: true }); break;
         case "tool-tab": this.store.patch("ui.selectedTool", button.dataset.tool); break;
         case "question-category": this.store.patch("ui.questionCategory", button.dataset.category); break;
-        case "open-ask-question": this.assertCanAskQuestion(); this.openModal("ask-question", { questionId: button.dataset.questionId }); break;
+        case "open-ask-question": await this.openAskQuestion(button.dataset.questionId); break;
         case "open-custom-answer": this.assertCanAnswerQuestion(); this.openModal("custom-answer", { questionInstanceId: button.dataset.questionInstance }); break;
         case "open-water-answer": this.assertCanAnswerQuestion(); this.openModal("water-answer", { questionInstanceId: button.dataset.questionInstance }); break;
         case "open-answer-photo": this.assertCanAnswerQuestion(); this.openModal("photo-answer", { questionInstanceId: button.dataset.questionInstance }); break;
@@ -853,6 +857,23 @@ class HideLineApp {
       console.error(error);
       this.toast(error.message || "Something went wrong.", "error");
     }
+  }
+
+  async openAskQuestion(questionId) {
+    this.assertCanAskQuestion();
+    if (questionId === "measuring-water") {
+      const state = this.store.get();
+      const needsOfficialMap = state.officialMapData?.status !== "ready" || !(state.officialMapData?.features || []).some((feature) => feature.category === "game_boundary");
+      const needsWater = state.waterData?.status !== "ready" || !usableWaterFeatures(state.waterData?.features || []).length;
+      if (needsOfficialMap || needsWater) {
+        this.toast("Loading the official Game Area and mapped water edges…", "");
+        await Promise.allSettled([
+          needsOfficialMap ? this.loadOfficialGameMap() : Promise.resolve(),
+          needsWater ? this.loadWaterData() : Promise.resolve()
+        ]);
+      }
+    }
+    this.openModal("ask-question", { questionId });
   }
 
   handleInput(event) {
@@ -1429,7 +1450,7 @@ class HideLineApp {
         const type = deductionInput.type || "mapped-reference";
         const explanation = type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE
           ? deductionInput.manualReference && category === "water"
-            ? "HideLine selected or recorded the seeker's exact nearest water edge. The hider repeats the same nearest-edge calculation privately; only Closer or Further is shared. Find Hiders compares every candidate point with its own nearest edge in the built-in water atlas."
+            ? "HideLine selected or recorded the seeker's exact nearest water edge. The hider repeats the same nearest-edge calculation privately; only Closer or Further is shared. Find Hiders compares every candidate point with its own nearest named water edge from the OpenStreetMap snapshot, clipped to the official Game Area."
             : deductionInput.manualReference
               ? `The exact player-selected reference is recorded. Automatic area elimination remains conservative until a complete ${categoryLabel} layer is available.`
               : `The seeker distance is measured to the exact orange point shown. Hider locations are compared with their own nearest valid ${categoryLabel}.`
@@ -1838,7 +1859,110 @@ class HideLineApp {
   }
 
   combinedSpatialData(state = this.store.get()) {
-    return mergeSpatialData(BUILT_IN_WATER_DATA, state.privateTeamState?.spatialData, state.referenceData);
+    const importedSpatialData = normaliseSpatialData(state.privateTeamState?.spatialData);
+    const officialBoundaries = (state.officialMapData?.features || []).filter((feature) => feature?.category === "game_boundary");
+    const clippingBoundaries = officialBoundaries.length
+      ? officialBoundaries
+      : importedSpatialData.features.filter((feature) => feature?.category === "game_boundary");
+    const effectiveWaterData = clipWaterDataToGameBoundary(
+      state.waterData,
+      clippingBoundaries
+    );
+    return mergeSpatialData(
+      importedSpatialData,
+      state.referenceData,
+      effectiveWaterData,
+      state.officialMapData
+    );
+  }
+
+  stationAuthority(state = this.store.get()) {
+    return resolveAuthoritativeStations(STATIONS, this.combinedSpatialData(state).features);
+  }
+
+  async loadOfficialGameMap({ force = false, announce = false } = {}) {
+    const current = this.store.get().officialMapData || {};
+    if (current.status === "loading" && !force) return current;
+    if (current.status === "ready" && current.features?.length && !force) return current;
+    this.store.patch("officialMapData", { ...current, status: "loading", error: null }, { source: "official-map", persist: false });
+    try {
+      let data;
+      let delivery = "bundled";
+      try {
+        data = await fetchBundledSpatialData({ force });
+      } catch (bundledError) {
+        delivery = "live";
+        try {
+          data = await fetchConfiguredSpatialData();
+        } catch (liveError) {
+          throw new Error(`${bundledError.message} ${liveError.message}`);
+        }
+      }
+      const boundaryCount = data.features.filter((feature) => feature.category === "game_boundary").length;
+      const authority = resolveAuthoritativeStations(STATIONS, data.features);
+      const value = {
+        ...data,
+        status: "ready",
+        updatedAt: data.importedAt || toIso(),
+        error: null,
+        delivery,
+        boundaryCount,
+        stationPinCount: authority.diagnostics.matchedCount
+      };
+      this.store.patch("officialMapData", value, { source: "official-map", persist: false });
+      if (announce) {
+        const warning = authority.diagnostics.fallbackCount
+          ? ` ${authority.diagnostics.fallbackCount} station circle${authority.diagnostics.fallbackCount === 1 ? "" : "s"} still use fallback coordinates.`
+          : " All 100 station circles use official game-map pins.";
+        this.toast(`Official map loaded: ${boundaryCount} boundary shape${boundaryCount === 1 ? "" : "s"}, ${authority.diagnostics.matchedCount}/100 station pins.${warning}`, authority.diagnostics.fallbackCount ? "warning" : "success");
+      }
+      return value;
+    } catch (error) {
+      const value = {
+        status: "error",
+        updatedAt: null,
+        sourceName: "Official Google My Map",
+        features: [],
+        error: error?.message || "The official game map could not be loaded."
+      };
+      this.store.patch("officialMapData", value, { source: "official-map", persist: false });
+      if (announce) this.toast(value.error, "warning");
+      throw error;
+    }
+  }
+
+  async loadWaterData({ force = false, announce = false } = {}) {
+    const current = this.store.get().waterData || {};
+    if (current.status === "loading" && !force) return current;
+    if (current.status === "ready" && current.features?.length && !force) return current;
+    this.store.patch("waterData", { ...current, status: "loading", error: null }, { source: "water-data", persist: false });
+    try {
+      const data = await loadAuthoritativeWaterData({ force });
+      const waterFeatures = usableWaterFeatures(data.features || []);
+      if (!waterFeatures.length) throw new Error("The deployed water snapshot contained no usable water-edge geometry.");
+      const value = {
+        ...data,
+        features: waterFeatures,
+        status: "ready",
+        updatedAt: data.importedAt || toIso(),
+        error: null
+      };
+      this.store.patch("waterData", value, { source: "water-data", persist: false });
+      if (announce) this.toast(`${waterFeatures.length} named water-edge feature${waterFeatures.length === 1 ? "" : "s"} loaded from ${data.sourceName || "OpenStreetMap"}.`, "success");
+      return value;
+    } catch (error) {
+      const value = {
+        status: "error",
+        updatedAt: null,
+        sourceName: "OpenStreetMap named water edges",
+        features: [],
+        error: error?.message || "Named water-edge geometry could not be loaded.",
+        delivery: null
+      };
+      this.store.patch("waterData", value, { source: "water-data", persist: false });
+      if (announce) this.toast(value.error, "warning");
+      throw error;
+    }
   }
 
   async loadReferenceData({ force = false, announce = false } = {}) {
@@ -1856,18 +1980,7 @@ class HideLineApp {
   }
 
   async ensureConfiguredGameMapData() {
-    if (this.publicMapLoadAttempted) return;
-    const current = normaliseSpatialData(this.store.get().privateTeamState?.spatialData);
-    if (current.features.some((feature) => feature.category === "game_boundary")) return;
-    this.publicMapLoadAttempted = true;
-    try {
-      const spatialData = await fetchConfiguredSpatialData();
-      if (!spatialData.features.some((feature) => feature.category === "game_boundary")) return;
-      await this.saveSpatialData(spatialData, "");
-    } catch {
-      // Google may block cross-origin KML downloads on some phones. The map
-      // setup panel keeps the explicit import option available in that case.
-    }
+    return this.loadOfficialGameMap();
   }
 
   async saveSpatialData(spatialData, successMessage) {
@@ -1889,9 +2002,8 @@ class HideLineApp {
   async loadConfiguredSpatialData(button) {
     if (button) button.disabled = true;
     try {
-      this.toast("Downloading the configured public Google My Map…", "");
-      const spatialData = await fetchConfiguredSpatialData();
-      await this.saveSpatialData(spatialData, `${spatialData.features.length} features loaded from the configured Google My Map.`);
+      this.toast("Refreshing the supplied official game map…", "");
+      await this.loadOfficialGameMap({ force: true, announce: true });
     } finally {
       if (button?.isConnected) button.disabled = false;
     }
@@ -2175,7 +2287,7 @@ class HideLineApp {
     const currentMode = String(form.querySelector(`[name="${CSS.escape(config.modeField)}"]`)?.value || "auto");
     if (!force && currentMode !== "auto" && this.coordinatePointFromForm(form, config.edgePrefix)) return null;
     const nearest = this.nearestWaterReference(locationPoint);
-    if (!nearest) throw new Error("No built-in water edge could be found near this location. Use Review on map to place the edge manually.");
+    if (!nearest) throw new Error("No mapped named water edge could be found near this location. Refresh water geometry, or use Review on map only for a clearly visible missing shoreline.");
 
     this.waterCalculatorRefreshing = true;
     try {
@@ -2224,7 +2336,7 @@ class HideLineApp {
     const text = summary?.querySelector("span");
     const distanceNode = summary?.querySelector("[data-water-reference-distance]");
     const playerDistance = locationPoint && edgePoint ? haversineMetres(locationPoint, edgePoint) : null;
-    const modeLabel = mode === "auto" ? "Built-in atlas" : mode === "reviewed" ? "Map reviewed" : "Manual edge";
+    const modeLabel = mode === "auto" ? "Mapped water data" : mode === "reviewed" ? "Map reviewed" : "Manual edge";
 
     if (text) {
       text.textContent = edgePoint
@@ -2233,8 +2345,8 @@ class HideLineApp {
     }
     if (distanceNode) {
       if (Number.isFinite(playerDistance)) distanceNode.textContent = `${Math.round(playerDistance)} m to the nearest edge · ${modeLabel}.`;
-      else if (!locationPoint) distanceNode.textContent = "Choose the location first. HideLine will select the nearest built-in water edge automatically.";
-      else distanceNode.textContent = "No built-in edge was found. Review the water map and place one manually.";
+      else if (!locationPoint) distanceNode.textContent = "Choose the location first. HideLine will select the nearest mapped named water edge automatically.";
+      else distanceNode.textContent = "No mapped edge was found. Refresh the water geometry before using a manual point.";
     }
     summary?.classList.toggle("selected", Boolean(edgePoint));
 
@@ -2345,7 +2457,7 @@ class HideLineApp {
     const title = context.waterName || (point ? "Selected water edge" : "Tap a water edge");
     const coords = point ? `${Number(point.lat).toFixed(6)}, ${Number(point.lng).toFixed(6)}` : "No edge selected yet";
     const distance = Number.isFinite(Number(context.distanceMetres)) ? `${Math.round(Number(context.distanceMetres))} m from the chosen location` : "Distance will be calculated automatically";
-    const source = context.snappedToFeature ? "Snapped to built-in shoreline" : "Exact player-selected point";
+    const source = context.snappedToFeature ? "Snapped to mapped shoreline" : "Exact player-selected point";
     return `<span>Nearest water edge</span><strong id="coordinate-picker-readout">${escapeHtml(title)}</strong><small id="coordinate-picker-detail">${escapeHtml(coords)} · ${escapeHtml(distance)} · ${escapeHtml(source)}</small>`;
   }
 
@@ -2364,7 +2476,7 @@ class HideLineApp {
     const point = context.point || context.mapInitialPoint || { lat: LONDON_MAP_CENTRE.lat, lng: LONDON_MAP_CENTRE.lng };
     const waterMode = context.mode === "water-edge";
     const instructions = waterMode
-      ? `HideLine has selected the nearest edge from its built-in Central London water atlas. Blue shapes are mapped water. Tap another blue edge to review it; the marker will snap when the tap is close enough. The controls below the map stay visible.`
+      ? `HideLine has selected the nearest mapped edge inside the official Game Area. Blue shapes are named OpenStreetMap water edges clipped to the red game boundary. Tap another blue edge to review it; the marker will snap when the tap is close enough. The controls below the map stay visible.`
       : "Tap the map or drag the pin, then select <strong>Use this point</strong>.";
     dialog.innerHTML = `
       <div class="modal-frame coordinate-picker-frame">
@@ -2373,7 +2485,7 @@ class HideLineApp {
           <button class="icon-button" type="button" data-action="coordinate-picker-cancel" aria-label="Close coordinate map">×</button>
         </header>
         <div class="modal-body coordinate-picker-body">
-          ${waterMode ? `<div class="callout water-map-instruction">${icon("info")}<p><strong>${context.referenceFeatures.length} named water shapes are built in.</strong> The orange marker is the edge used for the calculation. Swimming pools and fountains are excluded.</p></div><div class="coordinate-picker-water-legend" aria-label="Water measurement map key"><span><i class="water-origin-key"></i> Player location</span><span><i class="water-edge-key"></i> Selected edge</span><span><i class="water-line-key"></i> Measured distance</span></div>` : ""}
+          ${waterMode ? `<div class="callout water-map-instruction">${icon("info")}<p><strong>${context.referenceFeatures.length} named water-edge features are available inside the official Game Area.</strong> The orange marker is the edge used for the calculation. Water outside the red boundary, swimming pools and fountains are excluded.</p></div><div class="coordinate-picker-water-legend" aria-label="Water measurement map key"><span><i class="water-origin-key"></i> Player location</span><span><i class="water-edge-key"></i> Selected edge</span><span><i class="water-line-key"></i> Measured distance</span></div>` : ""}
           <div id="coordinate-picker-map" class="coordinate-picker-map" role="application" aria-label="Map for choosing question coordinates"></div>
         </div>
         <footer class="coordinate-picker-footer">
@@ -2393,7 +2505,7 @@ class HideLineApp {
       initialPoint: point,
       originPoint: waterMode ? context.seeker : null,
       referenceFeatures: waterMode ? context.referenceFeatures : [],
-      referenceLabel: waterMode ? "Built-in named water edges" : "",
+      referenceLabel: waterMode ? "Mapped named water edges inside the official Game Area" : "",
       onChange: (selected) => this.setCoordinatePickerPoint(selected)
     });
     if (token !== this.coordinatePickerRenderToken || !this.coordinatePickerContext) destroyCoordinatePickerMap();
@@ -2494,8 +2606,8 @@ class HideLineApp {
   }
 
   focusDeductionStation(id) {
-    const geo = STATION_GEO_BY_ID.get(id);
-    if (!geo) return;
+    const geo = this.stationAuthority().byId.get(id);
+    if (!geo || !Number.isFinite(Number(geo.lat)) || !Number.isFinite(Number(geo.lng))) return;
     this.store.patch("ui.deductionSelectedStationId", id);
     requestAnimationFrame(() => focusDeductionStation(geo));
   }
@@ -2672,9 +2784,9 @@ class HideLineApp {
           : selectedFeature ? "auto" : "manual";
         const seekerDistanceMetres = haversineMetres(seeker, selectedPoint);
         const measurementMethod = referenceMode === "auto"
-          ? "nearest edge from the built-in Central London water atlas"
+          ? "nearest edge from the deployed OpenStreetMap water-edge snapshot"
           : referenceMode === "reviewed"
-            ? "player-reviewed nearest edge from the built-in Central London water atlas"
+            ? "player-reviewed nearest edge from the deployed OpenStreetMap water-edge snapshot"
             : "exact player-selected nearest water edge";
         return {
           enabled: true,
@@ -2692,7 +2804,7 @@ class HideLineApp {
           referenceCategory: "water",
           referencePoint: selectedPoint,
           referenceGeometry: selectedFeature?.geometry || null,
-          referenceSource: selectedFeature?.source || (referenceMode === "manual" ? "Player-selected map edge" : "HideLine built-in water-edge atlas"),
+          referenceSource: selectedFeature?.source || (referenceMode === "manual" ? "Player-selected map edge" : "Deployment-generated OpenStreetMap water geometry"),
           seekerDistanceMetres,
           measurementMethod,
           manualReference: true,
@@ -2754,7 +2866,10 @@ class HideLineApp {
   async chooseStation(stationId, resolve = false) {
     const station = STATION_BY_ID.get(stationId);
     if (!station) throw new Error("Choose a valid station.");
-    const cached = cachedStationCoordinates(station.id);
+    const official = this.stationAuthority().byId.get(station.id);
+    const cached = official?.coordinateSource === "official-map"
+      ? { lat: official.lat, lng: official.lng, source: official.source, authoritative: true }
+      : cachedStationCoordinates(station.id);
     this.store.set((draft) => {
       draft.privateTeamState.stationId = station.id;
       draft.privateTeamState.stationName = station.name;
@@ -2768,12 +2883,21 @@ class HideLineApp {
   async resolveSelectedStation() {
     const station = STATION_BY_ID.get(this.store.get().privateTeamState.stationId);
     if (!station) throw new Error("Choose a station first.");
-    this.toast("Resolving station coordinates...", "");
+    const official = this.stationAuthority().byId.get(station.id);
+    if (official?.coordinateSource === "official-map") {
+      const coords = { lat: official.lat, lng: official.lng, source: official.source, authoritative: true };
+      this.store.patch("privateTeamState.stationCoords", coords);
+      await this.savePrivateTeamState();
+      if (this.store.get().ui.view === VIEWS.MAP && this.store.get().ui.mapMode === "zone") updateZoneMap({ station: this.stationMapObject(), positions: this.mapPositions(), radiusMetres: 500, question: this.pendingQuestion(), spatialFeatures: this.combinedSpatialData().features });
+      this.toast("Station centre confirmed from the official game-map pin.", "success");
+      return;
+    }
+    this.toast("The official station pin is unavailable; resolving a fallback coordinate…", "warning");
     const coords = await resolveStationCoordinates(station);
     this.store.patch("privateTeamState.stationCoords", coords);
     await this.savePrivateTeamState();
     if (this.store.get().ui.view === VIEWS.MAP && this.store.get().ui.mapMode === "zone") updateZoneMap({ station: this.stationMapObject(), positions: this.mapPositions(), radiusMetres: 500, question: this.pendingQuestion(), spatialFeatures: this.combinedSpatialData().features });
-    this.toast(`Coordinates resolved via ${coords.source}.`, "success");
+    this.toast(`Fallback coordinates resolved via ${coords.source}.`, "warning");
   }
 
   async toggleUsedStation(id) {
@@ -2793,8 +2917,11 @@ class HideLineApp {
   stationMapObject() {
     const state = this.store.get();
     const station = STATION_BY_ID.get(state.privateTeamState.stationId);
-    const coords = state.privateTeamState.stationCoords;
-    return station && coords ? { ...station, ...coords } : null;
+    if (!station) return null;
+    const official = this.stationAuthority(state).byId.get(station.id);
+    if (official?.coordinateSource === "official-map") return { ...station, ...official };
+    const coords = state.privateTeamState.stationCoords || official || cachedStationCoordinates(station.id);
+    return coords ? { ...station, ...coords } : null;
   }
 
   mapPositions() {
