@@ -1,5 +1,5 @@
-const CACHE_VERSION = "hideline-shell-v2.3.2";
-const RUNTIME_CACHE = "hideline-runtime-v2.3.2";
+const CACHE_VERSION = "hideline-shell-v2.3.3";
+const RUNTIME_CACHE = "hideline-runtime-v2.3.3";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -11,8 +11,8 @@ const APP_SHELL = [
   "./assets/icon-512.png",
   "./assets/icon-maskable-512.png",
   "./assets/apple-touch-icon.png",
-  "./src/styles.css?v=2.3.2",
-  "./src/app.js?v=2.3.2",
+  "./src/styles.css?v=2.3.3",
+  "./src/app.js?v=2.3.3",
   "./src/core/constants.js",
   "./src/core/format.js",
   "./src/core/time.js",
@@ -29,6 +29,7 @@ const APP_SHELL = [
   "./src/data/rules.js",
   "./src/data/boundary.js",
   "./src/data/thames-centreline.js",
+  "./src/data/water-edges.js",
   "./src/data/station-geo.js",
   "./src/services/geolocation.js",
   "./src/services/tfl.js",

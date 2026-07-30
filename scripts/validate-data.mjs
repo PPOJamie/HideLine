@@ -5,6 +5,8 @@ import { APP_VERSION } from "../src/core/constants.js";
 import { APPROXIMATE_GAME_BOUNDARY } from "../src/data/boundary.js";
 import { RAIL_LINES, STATION_GEO } from "../src/data/station-geo.js";
 import { THAMES_CENTRELINE } from "../src/data/thames-centreline.js";
+import { BUILT_IN_WATER_DATA, BUILT_IN_WATER_FEATURE_COUNT } from "../src/data/water-edges.js";
+import { normaliseSpatialData, usableWaterFeatures } from "../src/core/spatial.js";
 import { haversineMetres } from "../src/core/geo.js";
 import { access, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -38,6 +40,13 @@ assert(THAMES_CENTRELINE.length > 500, `Expected a high-resolution Thames guide,
 assert(THAMES_CENTRELINE.every((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng) && Number.isFinite(point.halfWidthMetres)), "Every Thames guide point needs latitude, longitude and a half-width.");
 assert(THAMES_CENTRELINE[0].lng < THAMES_CENTRELINE.at(-1).lng, "The Thames guide must run broadly west to east.");
 assert(THAMES_CENTRELINE.every((point, index, points) => index === 0 || haversineMetres(points[index - 1], point) <= 40), "Adjacent Thames guide points must remain within 40 metres.");
+const builtInWaterFeatures = usableWaterFeatures(normaliseSpatialData(BUILT_IN_WATER_DATA).features);
+assert(BUILT_IN_WATER_FEATURE_COUNT >= 36, `Expected at least 36 built-in named water features, found ${BUILT_IN_WATER_FEATURE_COUNT}.`);
+assert(builtInWaterFeatures.length === BUILT_IN_WATER_FEATURE_COUNT, "Every built-in water feature must contain usable line or polygon edge geometry.");
+assert(new Set(builtInWaterFeatures.map((feature) => feature.id)).size === builtInWaterFeatures.length, "Built-in water feature IDs must be unique.");
+for (const requiredName of ["River Thames", "Regent's Canal", "Canada Water", "The Serpentine"]) {
+  assert(builtInWaterFeatures.some((feature) => feature.name === requiredName), `The built-in water atlas is missing ${requiredName}.`);
+}
 const thamesAnchors = [
   { name: "Hammersmith Bridge", lat: 51.48630, lng: -0.22483 },
   { name: "Putney Bridge", lat: 51.46665, lng: -0.21339 },
@@ -81,4 +90,4 @@ if (failures.length) {
   console.error(failures.map((failure) => `- ${failure}`).join("\n"));
   process.exit(1);
 }
-console.log(`Validated HideLine ${APP_VERSION}: ${STATIONS.length} stations and coordinates, all ${QUESTIONS.length} linked questions, ${RAIL_LINES.length} line presets, the planning boundary, ${THAMES_CENTRELINE.length}-point remapped Thames guide and install assets.`);
+console.log(`Validated HideLine ${APP_VERSION}: ${STATIONS.length} stations and coordinates, all ${QUESTIONS.length} linked questions, ${RAIL_LINES.length} line presets, the planning boundary, ${THAMES_CENTRELINE.length}-point remapped Thames guide, ${BUILT_IN_WATER_FEATURE_COUNT} built-in named water edges and install assets.`);

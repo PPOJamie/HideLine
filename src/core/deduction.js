@@ -305,8 +305,8 @@ function prepareConstraint(constraint, context = {}) {
           features: waterFeatures,
           referencePoint,
           seekerDistanceMetres: storedDistance,
-          measurementMethod: constraint.measurementMethod || "exact player-selected nearest water edge",
-          reason: "The seeker baseline was selected manually; candidate locations are compared with their nearest usable water-edge geometry."
+          measurementMethod: constraint.measurementMethod || "nearest mapped water edge",
+          reason: "The seeker baseline is stored; every candidate location is compared with its own nearest usable water-edge geometry."
         };
       }
       return {
@@ -315,8 +315,8 @@ function prepareConstraint(constraint, context = {}) {
         manual: true,
         referencePoint,
         seekerDistanceMetres: Number.isFinite(storedDistance) ? storedDistance : null,
-        measurementMethod: constraint.measurementMethod || "exact player-selected nearest water edge",
-        reason: "The question and answer are valid, but automatic map shading needs a usable polygon or line layer for named bodies of water. Point placemarks and station pins are deliberately ignored."
+        measurementMethod: constraint.measurementMethod || "nearest mapped water edge",
+        reason: "The question and answer are valid, but no usable named-water line or polygon is available. Point placemarks and station pins are deliberately ignored."
       };
     }
     return {

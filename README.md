@@ -1,19 +1,25 @@
 # HideLine — London Hide + Seek Companion
 
-HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.3.2 completely replaces the confusing Body of Water place-name dropdown with a map-only, two-point distance calculator for both teams.
+HideLine is an installable, mobile-first companion for the two-round London transit hide-and-seek game in the supplied handbook. Version 2.3.3 makes the Body of Water workflow game-day ready with an always-visible mobile confirmation bar and a bundled Central London water-edge atlas that powers both teams' calculations and the Find Hiders map.
 
 ![Simple HideLine game screen](assets/screenshot-simple-desktop.png)
 
 ![Simple HideLine deduction map on mobile](assets/screenshot-simple-mobile.png)
 
-## What is new in 2.3.2
+## What is new in 2.3.3
 
-- **No Body of Water dropdown:** station names and incomplete water placemarks can no longer be chosen accidentally. The question does not depend on a list of water names.
-- **Seeker two-point measurement:** choose the seeker location, open **Select nearest water edge on map**, and tap the exact nearest bank or shoreline of the nearest valid named blue water area. HideLine draws the measurement line and calculates the baseline distance.
-- **Private hider calculator:** the hider opens **Calculate and answer**, chooses their current position and their own nearest valid water edge, and receives the calculated **Closer** or **Further** answer. The hider's two coordinates are not added to the shared game record.
-- **Map key and audit trail:** the picker distinguishes the player position, selected edge and measured line. The shared question retains the seeker pin, exact edge point, Google Maps links and baseline distance. Exact edge coordinates can also be entered manually when map tiles are unavailable.
-- **Safer water data:** point placemarks, station pins, swimming pools and fountains are ignored by automatic water deductions. In particular, a station such as Canada Water cannot be treated as a body of water.
-- **Legacy protection:** a pending Body of Water question made with the old list is labelled for re-asking rather than reusing a potentially incorrect reference.
+- **The map no longer blocks confirmation:** the water picker is split into a scrollable map area and a separate footer. **Use this water edge**, **Cancel** and the selected coordinates remain visible below the map on phones, including small screens and installed PWAs.
+- **Automatic nearest-edge selection:** after a player chooses their location, HideLine immediately finds the nearest valid bank or shoreline. The map is now a review step, not a compulsory manual measurement step.
+- **Built-in water-edge atlas:** 36 major named rivers, canals, docks, basins and park lakes across the game area are bundled with the app as line or polygon geometry. This includes the River Thames, Regent's Canal, Canada Water lake, the Serpentine and the main Surrey Docks waters.
+- **Find Hiders shading works without an import:** Body of Water answers now compare each sampled candidate point with its own nearest built-in named water edge. The question no longer stays unresolved merely because Google My Maps did not contain water polygons.
+- **Safer imported data:** a same-named station pin or water POI cannot overwrite a usable built-in shoreline. Swimming pools, fountains and point placemarks remain excluded.
+- **Manual review remains available:** tap another blue edge when the automatic choice is wrong. Tiny or omitted waters can still be entered manually, but the bundled atlas is used by default for consistent game-day deductions.
+
+## What changed in 2.3.2
+
+- Removed the Body of Water place-name dropdown completely, so station names and incomplete water placemarks can no longer be selected accidentally.
+- Added separate seeker and hider distance calculators, with private hider coordinates and a shared seeker baseline.
+- Added map keys, measurement lines, Google Maps links and legacy-question protection.
 
 ## What changed in 2.3.1
 
@@ -127,7 +133,7 @@ window.HIDELINE_CONFIG = {
 };
 ```
 
-HideLine 2.3.2 requires **no new Supabase migration**. The map-only Body of Water workflow, water-feature filtering and administrative-boundary fixes are client-side, as were the 2.3.0 timer, form-draft, answer-view and POI changes. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
+HideLine 2.3.3 requires **no new Supabase migration**. The built-in water atlas, mobile picker fix, water-feature filtering and administrative-boundary fixes are client-side, as were the 2.3.0 timer, form-draft, answer-view and POI changes. Existing projects that have not already applied the room-join repair should run `supabase/migrations/003_fix_join_game_ambiguity.sql`. Full backend instructions are in [`supabase/README.md`](supabase/README.md).
 
 ## Privacy model
 
@@ -141,7 +147,7 @@ Read [`PRIVACY.md`](PRIVACY.md) before operating a public deployment.
 
 ## Map accuracy
 
-The Google My Map remains the authoritative Game Area, station and curated-POI reference. HideLine draws it in red only when that exact polygon has loaded; the amber line is explicitly a fallback guide. OpenStreetMap supplies the visible street and river-bank basemap. Official GLA/ONS services supply the administrative polygons used for borough, ward and constituency questions. HideLine's 614-point Thames guide, deduction grid, station centres, 500 m circles and offline vector map are planning aids rather than surveyed boundaries. Use normal player judgement for bridges, tunnels, islands, foreshore, borderline paths and source-layer disputes.
+The Google My Map remains the authoritative Game Area, station and curated-POI reference. HideLine draws it in red only when that exact polygon has loaded; the amber line is explicitly a fallback guide. OpenStreetMap supplies the visible street and river-bank basemap. Official GLA/ONS services supply the administrative polygons used for borough, ward and constituency questions. HideLine's remapped Thames guide, built-in water-edge atlas, deduction grid, station centres, 500 m circles and offline vector map are planning aids rather than surveyed boundaries. Use normal player judgement for bridges, tunnels, islands, foreshore, borderline paths and source-layer disputes.
 
 ## Important safeguards
 

@@ -326,7 +326,7 @@ function setFallbackPickerPoint(point, { notify = false } = {}) {
   if (notify) coordinatePickerFallback.onChange?.(parsed);
 }
 
-function renderCoordinatePickerFallback(container, initialPoint, onChange, message = "", originPoint = null) {
+function renderCoordinatePickerFallback(container, initialPoint, onChange, message = "", originPoint = null, referenceFeatures = []) {
   const projection = VECTOR_MAP;
   const point = pickerPoint(initialPoint);
   const origin = originPoint ? pickerPoint(originPoint) : null;
@@ -335,12 +335,16 @@ function renderCoordinatePickerFallback(container, initialPoint, onChange, messa
     const projected = vectorPoint(station, projection);
     return `<circle cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="2.2" fill="#536273" fill-opacity=".62"><title>${escapeMapText(station.name)}</title></circle>`;
   }).join("");
+  const referenceSvg = (referenceFeatures || [])
+    .filter((feature) => feature?.geometry)
+    .map((feature) => vectorFeatureSvg(feature, "#166ea7", projection))
+    .join("");
   const projected = vectorPoint(point, projection);
   const projectedOrigin = origin ? vectorPoint(origin, projection) : null;
   const originGuide = projectedOrigin
     ? `<line data-picker-guide x1="${projectedOrigin.x.toFixed(1)}" y1="${projectedOrigin.y.toFixed(1)}" x2="${projected.x.toFixed(1)}" y2="${projected.y.toFixed(1)}" stroke="#ef7d00" stroke-width="3" stroke-dasharray="8 6" /><circle cx="${projectedOrigin.x.toFixed(1)}" cy="${projectedOrigin.y.toFixed(1)}" r="8" fill="#54b7e8" stroke="#0b4f75" stroke-width="3"><title>Selected player location</title></circle>`
     : "";
-  container.innerHTML = `<div class="coordinate-picker-fallback"><svg viewBox="0 0 ${projection.width} ${projection.height}" preserveAspectRatio="xMidYMid meet" role="application" aria-label="Tap the London map to choose coordinates"><rect width="${projection.width}" height="${projection.height}" rx="18" fill="#edf4f7" /><polygon points="${vectorPoints(boundary, projection)}" fill="#f26a3d" fill-opacity=".035" stroke="#e9572e" stroke-width="2.5" stroke-dasharray="10 8" /><polyline points="${vectorPoints(THAMES_CENTRELINE, projection)}" fill="none" stroke="#8bc7e3" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".38" /><polyline points="${vectorPoints(THAMES_CENTRELINE, projection)}" fill="none" stroke="#2176ae" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity=".78" />${stationDots}${originGuide}<circle data-picker-halo cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="13" fill="#fff" fill-opacity=".88" stroke="#0b1f33" stroke-width="2" /><circle data-picker-marker cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="7" fill="#f26a3d" stroke="#0b1f33" stroke-width="3" /></svg><p>${escapeMapText(message || "Offline map active. Tap anywhere to place the pin.")}</p></div>`;
+  container.innerHTML = `<div class="coordinate-picker-fallback"><svg viewBox="0 0 ${projection.width} ${projection.height}" preserveAspectRatio="xMidYMid meet" role="application" aria-label="Tap the London map to choose coordinates"><rect width="${projection.width}" height="${projection.height}" rx="18" fill="#edf4f7" /><polygon points="${vectorPoints(boundary, projection)}" fill="#f26a3d" fill-opacity=".035" stroke="#e9572e" stroke-width="2.5" stroke-dasharray="10 8" />${referenceSvg || `<polyline points="${vectorPoints(THAMES_CENTRELINE, projection)}" fill="none" stroke="#8bc7e3" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".38" /><polyline points="${vectorPoints(THAMES_CENTRELINE, projection)}" fill="none" stroke="#2176ae" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity=".78" />`}${stationDots}${originGuide}<circle data-picker-halo cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="13" fill="#fff" fill-opacity=".88" stroke="#0b1f33" stroke-width="2" /><circle data-picker-marker cx="${projected.x.toFixed(1)}" cy="${projected.y.toFixed(1)}" r="7" fill="#f26a3d" stroke="#0b1f33" stroke-width="3" /></svg><p>${escapeMapText(message || "Offline map active. Tap anywhere to place the pin.")}</p></div>`;
   const svg = container.querySelector("svg");
   coordinatePickerFallback = {
     container,
@@ -389,9 +393,9 @@ export async function renderCoordinatePickerMap({
     L = await loadLeaflet();
   } catch (error) {
     const message = origin
-      ? "Online map tiles are unavailable. The fallback shows only the Thames guide; for another water body, cancel and enter the exact edge coordinates manually."
+      ? "Online map tiles are unavailable. The built-in water-edge atlas is shown in simplified vector form; tap an edge and confirm below."
       : error.message;
-    return renderCoordinatePickerFallback(container, point, onChange, message, origin);
+    return renderCoordinatePickerFallback(container, point, onChange, message, origin, referenceFeatures);
   }
   coordinatePickerMapInstance = L.map(container, { zoomControl: true, attributionControl: true }).setView([point.lat, point.lng], 15);
   addBaseMap(L, coordinatePickerMapInstance);

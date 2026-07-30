@@ -104,29 +104,32 @@ test("boundary parser accepts ArcGIS JSON when GeoJSON is unavailable", async ()
   assert.equal(result.features[0].properties.LAD25NM, "Test Borough");
 });
 
-test("Body of Water asking is map-only and contains no place-name dropdown", () => {
+test("Body of Water asking automatically uses the built-in water atlas without a place-name dropdown", () => {
   const html = renderModal("ask-question", modalState(), { questionId: "measuring-water" });
-  assert.match(html, /There is no place-name list/i);
-  assert.match(html, /Select nearest water edge on map/);
+  assert.match(html, /automatically selects the nearest shoreline or bank/i);
+  assert.match(html, /Recalculate nearest edge/);
+  assert.match(html, /Review on map/);
   assert.match(html, /data-picker-mode="water-edge"/);
   assert.match(html, /data-water-calculator/);
   assert.match(html, /name="deductionWaterPointLat"/);
   assert.match(html, /name="deductionWaterPointLng"/);
-  assert.match(html, /Water name[\s\S]*optional/i);
+  assert.match(html, /name="deductionWaterReferenceMode"/);
+  assert.match(html, /name="deductionWaterFeatureId"/);
   assert.doesNotMatch(html, /name="deductionReferenceFeatureId"/);
+  assert.doesNotMatch(html, /<select[^>]*deduction-water/i);
   assert.doesNotMatch(html, /<option[^>]*>Test Water<\/option>/);
-  assert.match(appSource, /waterWorkflowVersion:\s*2/);
-  assert.match(appSource, /exact player-selected nearest water edge/);
+  assert.match(appSource, /waterWorkflowVersion:\s*3/);
+  assert.match(appSource, /built-in Central London water atlas/i);
 });
 
-test("Body of Water answering uses a private two-point calculator", () => {
+test("Body of Water answering uses a private automatic nearest-edge calculator", () => {
   const question = {
     id: "water-question",
     questionId: "measuring-water",
     questionName: "Body of water",
     status: "pending",
     deductionInput: {
-      waterWorkflowVersion: 2,
+      waterWorkflowVersion: 3,
       seekerDistanceMetres: 620,
       referencePoint: { lat: 51.51, lng: -0.12 }
     },
@@ -137,7 +140,9 @@ test("Body of Water answering uses a private two-point calculator", () => {
   assert.match(html, /620 m/);
   assert.match(html, /name="hiderWaterLocationLat"/);
   assert.match(html, /name="hiderWaterEdgeLat"/);
-  assert.match(html, /Select my nearest water edge on map/);
+  assert.match(html, /Check the automatic nearest edge/i);
+  assert.match(html, /Recalculate nearest edge/);
+  assert.match(html, /Review on map/);
   assert.match(html, /name="computedAnswer"/);
   assert.match(html, /Submit calculated answer/);
   assert.doesNotMatch(html, /<select/);
@@ -207,7 +212,7 @@ test("water deduction stays transparent without geometry and activates with a us
   assert.equal(unresolved.manual, true);
   assert.deepEqual(unresolved.referencePoint, { lat: 51.505, lng: -0.125 });
   assert.equal(unresolved.seekerDistanceMetres, 654);
-  assert.match(unresolved.reason, /polygon or line layer/i);
+  assert.match(unresolved.reason, /named-water line or polygon/i);
 
   const resolved = constraintResolution(constraint, { spatialFeatures: [waterFeature()] });
   assert.equal(resolved.ready, true);
@@ -216,11 +221,14 @@ test("water deduction stays transparent without geometry and activates with a us
   assert.equal(typeof evaluateConstraintAtPoint(constraint, { lat: 51.505, lng: -0.115 }, { spatialFeatures: [waterFeature()] }), "boolean");
 });
 
-test("the coordinate picker draws the player location and measurement line online and offline", () => {
+test("the coordinate picker keeps its confirmation footer visible and draws water geometry online and offline", () => {
   assert.match(mapSource, /originPoint = null/);
+  assert.match(mapSource, /referenceFeatures = \[\]/);
   assert.match(mapSource, /coordinatePickerOriginMarker/);
   assert.match(mapSource, /coordinatePickerGuideLine/);
   assert.match(mapSource, /data-picker-guide/);
+  assert.match(mapSource, /built-in water-edge atlas/i);
   assert.match(appSource, /coordinate-picker-water-legend/);
-  assert.match(appSource, /Use this exact edge/);
+  assert.match(appSource, /coordinate-picker-footer/);
+  assert.match(appSource, /Use this water edge/);
 });

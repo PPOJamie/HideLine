@@ -20,6 +20,7 @@ import { questionDeductionConfig } from "./data/question-deduction.js";
 import { STATIONS, STATION_BY_ID, stationNameLength } from "./data/stations.js";
 import { STATION_GEO_BY_ID } from "./data/station-geo.js";
 import { LONDON_MAP_CENTRE } from "./data/boundary.js";
+import { BUILT_IN_WATER_DATA } from "./data/water-edges.js";
 import { SupabaseSync } from "./services/supabase.js";
 import { LocationService } from "./services/geolocation.js";
 import { compressImage } from "./services/media.js";
@@ -39,7 +40,8 @@ import {
   mergeSpatialData,
   nearestFeature,
   normaliseSpatialData,
-  spatialCategoryLabel
+  spatialCategoryLabel,
+  usableWaterFeatures
 } from "./core/spatial.js";
 import { cachedStationCoordinates, resolveStationCoordinates } from "./services/stations.js";
 import {
@@ -90,6 +92,7 @@ class HideLineApp {
     this.alertedQuestionIds = new Set();
     this.notificationSweepTimer = null;
     this.publicMapLoadAttempted = false;
+    this.waterCalculatorRefreshing = false;
   }
 
   async init() {
@@ -797,6 +800,7 @@ class HideLineApp {
         case "coordinate-picker-cancel": this.closeCoordinatePicker(); break;
         case "coordinate-picker-use-gps": await this.useCoordinatePickerGps(); break;
         case "coordinate-picker-confirm": this.confirmCoordinatePicker(); break;
+        case "water-reference-auto": this.applyNearestWaterReference(button.closest("form"), { announce: true, force: true }); break;
         case "deduction-pick-map": this.startDeductionMapPick(button.dataset.prefix, button); break;
         case "deduction-pick-vertex": this.startDeductionVertexPick(button); break;
         case "deduction-clear-vertices": this.clearDeductionVertices(button); break;
@@ -858,7 +862,12 @@ class HideLineApp {
     if (coordinateMatch) {
       const form = event.target.closest("form");
       this.updateCoordinateSummary(form, coordinateMatch[1]);
-      if (form?.querySelector("[data-water-calculator]")) this.refreshWaterCalculator(form);
+      const waterConfig = this.waterCalculatorConfig(form);
+      if (waterConfig && coordinateMatch[1] === waterConfig.edgePrefix && event.isTrusted) {
+        const modeInput = form.querySelector(`[name="${CSS.escape(waterConfig.modeField)}"]`);
+        if (modeInput) modeInput.value = "manual";
+      }
+      if (waterConfig) this.refreshWaterCalculator(form);
     }
     if (action === "water-reference-name") this.refreshWaterCalculator(event.target.closest("form"));
     if (action === "question-search") this.debouncedPatch("ui.questionSearch", event.target.value);
@@ -1420,7 +1429,7 @@ class HideLineApp {
         const type = deductionInput.type || "mapped-reference";
         const explanation = type === DEDUCTION_TOOL_TYPES.NEAREST_FEATURE_DISTANCE
           ? deductionInput.manualReference && category === "water"
-            ? "The seeker tapped this exact nearest water edge on the map. The hider repeats the same two-point calculation privately; only Closer or Further is shared. Find Hiders shading is applied only when usable water-edge geometry is available."
+            ? "HideLine selected or recorded the seeker's exact nearest water edge. The hider repeats the same nearest-edge calculation privately; only Closer or Further is shared. Find Hiders compares every candidate point with its own nearest edge in the built-in water atlas."
             : deductionInput.manualReference
               ? `The exact player-selected reference is recorded. Automatic area elimination remains conservative until a complete ${categoryLabel} layer is available.`
               : `The seeker distance is measured to the exact orange point shown. Hider locations are compared with their own nearest valid ${categoryLabel}.`
@@ -1829,7 +1838,7 @@ class HideLineApp {
   }
 
   combinedSpatialData(state = this.store.get()) {
-    return mergeSpatialData(state.privateTeamState?.spatialData, state.referenceData);
+    return mergeSpatialData(BUILT_IN_WATER_DATA, state.privateTeamState?.spatialData, state.referenceData);
   }
 
   async loadReferenceData({ force = false, announce = false } = {}) {
@@ -2069,7 +2078,7 @@ class HideLineApp {
     this.toast("Deduction applied to the private seeker map.", "success");
   }
 
-  fillCoordinateFields(form, prefix, point) {
+  fillCoordinateFields(form, prefix, point, { dispatch = true } = {}) {
     if (!form || !point) return;
     const lat = form.querySelector(`[name="${CSS.escape(prefix)}Lat"]`);
     const lng = form.querySelector(`[name="${CSS.escape(prefix)}Lng"]`);
@@ -2077,8 +2086,10 @@ class HideLineApp {
     lat.value = Number(point.lat).toFixed(6);
     lng.value = Number(point.lng).toFixed(6);
     this.updateCoordinateSummary(form, prefix);
-    lat.dispatchEvent(new Event("input", { bubbles: true }));
-    lng.dispatchEvent(new Event("input", { bubbles: true }));
+    if (dispatch) {
+      lat.dispatchEvent(new Event("input", { bubbles: true }));
+      lng.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     this.captureModalDraft();
   }
 
@@ -2124,26 +2135,96 @@ class HideLineApp {
       locationPrefix: String(section.dataset.locationPrefix || "deductionSeeker"),
       edgePrefix: String(section.dataset.edgePrefix || "deductionWaterPoint"),
       nameField: String(section.dataset.nameField || "deductionWaterName"),
+      modeField: String(section.dataset.modeField || "deductionWaterReferenceMode"),
+      featureIdField: String(section.dataset.featureIdField || "deductionWaterFeatureId"),
       baselineDistance: section.dataset.baselineDistance === "" || section.dataset.baselineDistance == null
         ? null
         : Number(section.dataset.baselineDistance)
     };
   }
 
-  refreshWaterCalculator(form) {
+  nearestWaterReference(locationPoint, state = this.store.get()) {
+    if (!locationPoint) return null;
+    const features = usableWaterFeatures(featuresForCategory(this.combinedSpatialData(state).features, "water"));
+    const options = measurementOptionsForCategory("water", { boundaryOnly: true });
+    const nearest = nearestFeature(locationPoint, features, options);
+    if (!nearest?.feature) return null;
+    const edge = featureNearestPoint(locationPoint, nearest.feature, options);
+    if (!edge?.point || !Number.isFinite(Number(edge.distanceMetres))) return null;
+    return {
+      feature: nearest.feature,
+      point: { lat: Number(edge.point.lat), lng: Number(edge.point.lng) },
+      distanceMetres: Number(edge.distanceMetres)
+    };
+  }
+
+  setWaterReferenceMetadata(form, config, { mode = "manual", feature = null } = {}) {
+    const modeInput = form?.querySelector(`[name="${CSS.escape(config.modeField)}"]`);
+    const featureInput = form?.querySelector(`[name="${CSS.escape(config.featureIdField)}"]`);
+    if (modeInput) modeInput.value = mode;
+    if (featureInput) featureInput.value = feature?.id || "";
+    const nameInput = form?.querySelector(`[name="${CSS.escape(config.nameField)}"]`);
+    if (nameInput && feature?.name) nameInput.value = feature.name;
+  }
+
+  applyNearestWaterReference(form, { announce = false, force = false } = {}) {
+    const config = this.waterCalculatorConfig(form);
+    if (!config) throw new Error("The Body of Water calculator is not open.");
+    const locationPoint = this.coordinatePointFromForm(form, config.locationPrefix);
+    if (!locationPoint) throw new Error("Choose the player location first.");
+    const currentMode = String(form.querySelector(`[name="${CSS.escape(config.modeField)}"]`)?.value || "auto");
+    if (!force && currentMode !== "auto" && this.coordinatePointFromForm(form, config.edgePrefix)) return null;
+    const nearest = this.nearestWaterReference(locationPoint);
+    if (!nearest) throw new Error("No built-in water edge could be found near this location. Use Review on map to place the edge manually.");
+
+    this.waterCalculatorRefreshing = true;
+    try {
+      this.fillCoordinateFields(form, config.edgePrefix, nearest.point, { dispatch: false });
+      this.setWaterReferenceMetadata(form, config, { mode: "auto", feature: nearest.feature });
+    } finally {
+      this.waterCalculatorRefreshing = false;
+    }
+    this.refreshWaterCalculator(form, { skipAuto: true });
+    this.captureModalDraft();
+    if (announce) this.toast(`Nearest mapped edge selected: ${nearest.feature.name} (${Math.round(nearest.distanceMetres)} m).`, "success");
+    return nearest;
+  }
+
+  refreshWaterCalculator(form, { skipAuto = false } = {}) {
+    if (this.waterCalculatorRefreshing) return;
     const config = this.waterCalculatorConfig(form);
     if (!config) return;
-    const { section, locationPrefix, edgePrefix, nameField, baselineDistance } = config;
+    const { section, locationPrefix, edgePrefix, nameField, modeField, baselineDistance } = config;
     this.updateCoordinateSummary(form, locationPrefix);
     this.updateCoordinateSummary(form, edgePrefix);
 
-    const locationPoint = this.coordinatePointFromForm(form, locationPrefix);
-    const edgePoint = this.coordinatePointFromForm(form, edgePrefix);
+    let locationPoint = this.coordinatePointFromForm(form, locationPrefix);
+    let edgePoint = this.coordinatePointFromForm(form, edgePrefix);
+    let mode = String(form.querySelector(`[name="${CSS.escape(modeField)}"]`)?.value || "auto");
+
+    if (!skipAuto && locationPoint && mode === "auto") {
+      try {
+        const nearest = this.nearestWaterReference(locationPoint);
+        if (nearest) {
+          this.waterCalculatorRefreshing = true;
+          this.fillCoordinateFields(form, edgePrefix, nearest.point, { dispatch: false });
+          this.setWaterReferenceMetadata(form, config, { mode: "auto", feature: nearest.feature });
+          edgePoint = nearest.point;
+          mode = "auto";
+        }
+      } finally {
+        this.waterCalculatorRefreshing = false;
+      }
+    }
+
+    locationPoint = this.coordinatePointFromForm(form, locationPrefix);
+    edgePoint = this.coordinatePointFromForm(form, edgePrefix);
     const name = String(form.querySelector(`[name="${CSS.escape(nameField)}"]`)?.value || "").trim();
     const summary = section.querySelector("[data-water-reference-summary]");
     const text = summary?.querySelector("span");
     const distanceNode = summary?.querySelector("[data-water-reference-distance]");
     const playerDistance = locationPoint && edgePoint ? haversineMetres(locationPoint, edgePoint) : null;
+    const modeLabel = mode === "auto" ? "Built-in atlas" : mode === "reviewed" ? "Map reviewed" : "Manual edge";
 
     if (text) {
       text.textContent = edgePoint
@@ -2151,9 +2232,9 @@ class HideLineApp {
         : "No water-edge point selected yet";
     }
     if (distanceNode) {
-      if (Number.isFinite(playerDistance)) distanceNode.textContent = `${Math.round(playerDistance)} m from the selected location to this exact water edge.`;
-      else if (!locationPoint) distanceNode.textContent = "Choose the location first, then tap the nearest valid water edge.";
-      else distanceNode.textContent = "Tap the exact nearest edge of the nearest named blue water area.";
+      if (Number.isFinite(playerDistance)) distanceNode.textContent = `${Math.round(playerDistance)} m to the nearest edge · ${modeLabel}.`;
+      else if (!locationPoint) distanceNode.textContent = "Choose the location first. HideLine will select the nearest built-in water edge automatically.";
+      else distanceNode.textContent = "No built-in edge was found. Review the water map and place one manually.";
     }
     summary?.classList.toggle("selected", Boolean(edgePoint));
 
@@ -2162,14 +2243,14 @@ class HideLineApp {
     const submit = form.querySelector("[data-water-answer-submit]");
     if (result || answerInput || submit) {
       let answer = "";
-      let title = "Select both map points";
-      let detail = "HideLine will compare your distance with the seeker’s recorded distance.";
+      let title = "Choose your location";
+      let detail = "HideLine will select your nearest mapped water edge and compare the distances.";
       let tone = "pending";
       if (Number.isFinite(playerDistance) && Number.isFinite(baselineDistance)) {
         const comparison = bodyOfWaterDistanceResult(locationPoint, edgePoint, baselineDistance);
         if (!comparison.ready) {
           title = "Too close to call automatically";
-          detail = `Both distances round to about ${Math.round(playerDistance)} m. Check the map and use the manual answer below.`;
+          detail = `Both distances round to about ${Math.round(playerDistance)} m. Review the map and use the manual answer below.`;
           tone = "review";
         } else {
           answer = comparison.answer;
@@ -2179,7 +2260,7 @@ class HideLineApp {
         }
       } else if (!Number.isFinite(baselineDistance)) {
         title = "Seeker distance missing";
-        detail = "The question must be re-asked with the new water workflow.";
+        detail = "The question must be re-asked with the current water workflow.";
         tone = "review";
       }
       if (answerInput) answerInput.value = answer;
@@ -2209,14 +2290,27 @@ class HideLineApp {
     const mode = String(button.dataset.pickerMode || "point");
     const seekerPrefix = String(button.dataset.seekerPrefix || "").trim();
     const seeker = seekerPrefix ? this.coordinatePointFromForm(form, seekerPrefix) : null;
-    if (mode === "water-edge" && !seeker) throw new Error("Choose the location first, then select its nearest water edge.");
+    if (mode === "water-edge" && !seeker) throw new Error("Choose the location first, then review its nearest water edge.");
 
     const existingPoint = this.coordinatePointFromForm(form, prefix);
     const calculator = this.waterCalculatorConfig(form);
-    const waterName = mode === "water-edge" && calculator
+    const waterFeatures = mode === "water-edge"
+      ? usableWaterFeatures(featuresForCategory(this.combinedSpatialData().features, "water"))
+      : [];
+    const storedMode = mode === "water-edge" && calculator
+      ? String(form.querySelector(`[name="${CSS.escape(calculator.modeField)}"]`)?.value || "auto")
+      : "auto";
+    const storedFeatureId = mode === "water-edge" && calculator
+      ? String(form.querySelector(`[name="${CSS.escape(calculator.featureIdField)}"]`)?.value || "")
+      : "";
+    const storedFeature = waterFeatures.find((feature) => feature.id === storedFeatureId) || null;
+    const automaticReference = mode === "water-edge" && seeker ? this.nearestWaterReference(seeker) : null;
+    const point = existingPoint || automaticReference?.point || null;
+    const storedName = mode === "water-edge" && calculator
       ? String(form.querySelector(`[name="${CSS.escape(calculator.nameField)}"]`)?.value || "").trim()
       : "";
-    const point = existingPoint || null;
+    const activeFeature = storedFeature || (!existingPoint ? automaticReference?.feature : null);
+    const waterName = storedName || activeFeature?.name || automaticReference?.feature?.name || "";
     const mapInitialPoint = point || seeker || this.store.get().location.current || { lat: LONDON_MAP_CENTRE.lat, lng: LONDON_MAP_CENTRE.lng };
 
     this.coordinatePickerContext = {
@@ -2228,8 +2322,10 @@ class HideLineApp {
       seeker,
       point,
       mapInitialPoint,
-      referenceFeatures: [],
+      referenceFeatures: waterFeatures,
       waterName,
+      waterFeature: activeFeature,
+      snappedToFeature: storedMode !== "manual" && Boolean(activeFeature),
       distanceMetres: seeker && point ? haversineMetres(seeker, point) : null
     };
     await this.renderCurrentCoordinatePicker();
@@ -2246,10 +2342,11 @@ class HideLineApp {
       return `<span>Selected point</span><strong id="coordinate-picker-readout">${Number(point.lat).toFixed(6)}, ${Number(point.lng).toFixed(6)}</strong>`;
     }
     const point = context.point;
-    const title = context.waterName || (point ? "Selected water edge" : "Tap the exact water edge");
+    const title = context.waterName || (point ? "Selected water edge" : "Tap a water edge");
     const coords = point ? `${Number(point.lat).toFixed(6)}, ${Number(point.lng).toFixed(6)}` : "No edge selected yet";
     const distance = Number.isFinite(Number(context.distanceMetres)) ? `${Math.round(Number(context.distanceMetres))} m from the chosen location` : "Distance will be calculated automatically";
-    return `<span>Nearest water edge</span><strong id="coordinate-picker-readout">${escapeHtml(title)}</strong><small id="coordinate-picker-detail">${escapeHtml(coords)} · ${escapeHtml(distance)}</small>`;
+    const source = context.snappedToFeature ? "Snapped to built-in shoreline" : "Exact player-selected point";
+    return `<span>Nearest water edge</span><strong id="coordinate-picker-readout">${escapeHtml(title)}</strong><small id="coordinate-picker-detail">${escapeHtml(coords)} · ${escapeHtml(distance)} · ${escapeHtml(source)}</small>`;
   }
 
   updateCoordinatePickerReadout() {
@@ -2267,24 +2364,26 @@ class HideLineApp {
     const point = context.point || context.mapInitialPoint || { lat: LONDON_MAP_CENTRE.lat, lng: LONDON_MAP_CENTRE.lng };
     const waterMode = context.mode === "water-edge";
     const instructions = waterMode
-      ? "Use the normal map as the reference. Tap the exact nearest edge of the nearest <strong>named blue water area</strong>. HideLine will use the point you tap exactly; it will not guess, snap to a list or choose a place for you. Do not use a swimming pool or fountain."
+      ? `HideLine has selected the nearest edge from its built-in Central London water atlas. Blue shapes are mapped water. Tap another blue edge to review it; the marker will snap when the tap is close enough. The controls below the map stay visible.`
       : "Tap the map or drag the pin, then select <strong>Use this point</strong>.";
     dialog.innerHTML = `
       <div class="modal-frame coordinate-picker-frame">
         <header class="modal-header">
-          <div><p class="eyebrow">${waterMode ? "Select exact water edge" : "Choose on map"}</p><h2>${escapeHtml(context.label)}</h2><p>${instructions}</p></div>
+          <div><p class="eyebrow">${waterMode ? "Review nearest water edge" : "Choose on map"}</p><h2>${escapeHtml(context.label)}</h2><p>${instructions}</p></div>
           <button class="icon-button" type="button" data-action="coordinate-picker-cancel" aria-label="Close coordinate map">×</button>
         </header>
         <div class="modal-body coordinate-picker-body">
-          ${waterMode ? `<div class="callout water-map-instruction">${icon("info")}<p><strong>No dropdown is used.</strong> Zoom in and place the marker directly on the visible bank or shoreline that you judge to be nearest.</p></div><div class="coordinate-picker-water-legend" aria-label="Water measurement map key"><span><i class="water-origin-key"></i> Selected player location</span><span><i class="water-edge-key"></i> Exact water edge</span><span><i class="water-line-key"></i> Distance measured</span></div>` : ""}
+          ${waterMode ? `<div class="callout water-map-instruction">${icon("info")}<p><strong>${context.referenceFeatures.length} named water shapes are built in.</strong> The orange marker is the edge used for the calculation. Swimming pools and fountains are excluded.</p></div><div class="coordinate-picker-water-legend" aria-label="Water measurement map key"><span><i class="water-origin-key"></i> Player location</span><span><i class="water-edge-key"></i> Selected edge</span><span><i class="water-line-key"></i> Measured distance</span></div>` : ""}
           <div id="coordinate-picker-map" class="coordinate-picker-map" role="application" aria-label="Map for choosing question coordinates"></div>
+        </div>
+        <footer class="coordinate-picker-footer">
           <div class="coordinate-picker-readout" aria-live="polite">${this.coordinatePickerReadoutHtml(context)}</div>
           <div class="coordinate-picker-actions">
             ${waterMode ? "" : '<button class="button button-soft" type="button" data-action="coordinate-picker-use-gps">Use my GPS</button>'}
             <button class="button button-soft" type="button" data-action="coordinate-picker-cancel">Cancel</button>
-            <button class="button button-primary" type="button" data-action="coordinate-picker-confirm">${waterMode ? "Use this exact edge" : "Use this point"}</button>
+            <button class="button button-primary" type="button" data-action="coordinate-picker-confirm">${waterMode ? "Use this water edge" : "Use this point"}</button>
           </div>
-        </div>
+        </footer>
       </div>`;
     if (!dialog.open) {
       try { dialog.showModal(); }
@@ -2293,8 +2392,8 @@ class HideLineApp {
     await renderCoordinatePickerMap({
       initialPoint: point,
       originPoint: waterMode ? context.seeker : null,
-      referenceFeatures: [],
-      referenceLabel: "",
+      referenceFeatures: waterMode ? context.referenceFeatures : [],
+      referenceLabel: waterMode ? "Built-in named water edges" : "",
       onChange: (selected) => this.setCoordinatePickerPoint(selected)
     });
     if (token !== this.coordinatePickerRenderToken || !this.coordinatePickerContext) destroyCoordinatePickerMap();
@@ -2306,7 +2405,26 @@ class HideLineApp {
     const lat = Number(point?.lat);
     const lng = Number(point?.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    context.point = { lat, lng };
+    let selected = { lat, lng };
+    context.waterFeature = null;
+    context.snappedToFeature = false;
+
+    if (context.mode === "water-edge" && context.referenceFeatures?.length) {
+      const options = measurementOptionsForCategory("water", { boundaryOnly: true });
+      const nearest = nearestFeature(selected, context.referenceFeatures, options);
+      const edge = nearest?.feature ? featureNearestPoint(selected, nearest.feature, options) : null;
+      if (edge?.point && Number(edge.distanceMetres) <= 140) {
+        selected = { lat: Number(edge.point.lat), lng: Number(edge.point.lng) };
+        context.waterFeature = nearest.feature;
+        context.waterName = nearest.feature.name;
+        context.snappedToFeature = true;
+        if (haversineMetres({ lat, lng }, selected) > 0.5) updateCoordinatePickerPoint(selected, { pan: false });
+      } else {
+        context.waterName = "Player-selected water edge";
+      }
+    }
+
+    context.point = selected;
     if (context.mode === "water-edge") context.distanceMetres = context.seeker ? haversineMetres(context.seeker, context.point) : null;
     this.updateCoordinatePickerReadout();
   }
@@ -2323,16 +2441,27 @@ class HideLineApp {
     if (!context?.point) throw new Error(context?.mode === "water-edge" ? "Choose the shoreline point on the map first." : "Choose a point on the map first.");
     const form = this.coordinatePickerForm();
     if (!form) throw new Error("The question form is no longer open.");
-    this.fillCoordinateFields(form, context.prefix, context.point);
-
     if (context.mode === "water-edge") {
-      this.refreshWaterCalculator(form);
+      const calculator = this.waterCalculatorConfig(form);
+      if (calculator) {
+        this.setWaterReferenceMetadata(form, calculator, {
+          mode: context.snappedToFeature ? "reviewed" : "manual",
+          feature: context.waterFeature
+        });
+        const nameInput = form.querySelector(`[name="${CSS.escape(calculator.nameField)}"]`);
+        if (nameInput && context.waterName) nameInput.value = context.waterName;
+      }
+      this.waterCalculatorRefreshing = true;
+      try { this.fillCoordinateFields(form, context.prefix, context.point, { dispatch: false }); }
+      finally { this.waterCalculatorRefreshing = false; }
+      this.refreshWaterCalculator(form, { skipAuto: true });
       this.captureModalDraft();
       this.closeCoordinatePicker();
-      this.toast("Exact water-edge point and distance added.", "success");
+      this.toast(context.snappedToFeature ? `Mapped water edge selected: ${context.waterName}.` : "Exact manual water-edge point added.", "success");
       return;
     }
 
+    this.fillCoordinateFields(form, context.prefix, context.point);
     const pinInput = form.querySelector('[name="pinLabel"]');
     if (pinInput && !String(pinInput.value || "").trim()) {
       const lat = Number(context.point.lat).toFixed(6);
@@ -2534,9 +2663,19 @@ class HideLineApp {
       const boundaryOnly = Boolean(config.boundaryOnly) || ["water", "borough"].includes(config.category);
       if (config.category === "water") {
         const selectedPoint = this.optionalDeductionPoint(data, "deductionWaterPoint", "the nearest water edge");
-        if (!selectedPoint) throw new Error("Select the exact nearest water edge from the map before asking this question.");
-        const selectedName = String(data.deductionWaterName || "").trim();
+        if (!selectedPoint) throw new Error("Choose the seeker location so HideLine can select its nearest water edge.");
+        const selectedFeatureId = String(data.deductionWaterFeatureId || "").trim();
+        const selectedFeature = categoryFeatures.find((feature) => feature.id === selectedFeatureId) || null;
+        const selectedName = String(data.deductionWaterName || selectedFeature?.name || "").trim();
+        const referenceMode = ["auto", "reviewed", "manual"].includes(String(data.deductionWaterReferenceMode || ""))
+          ? String(data.deductionWaterReferenceMode)
+          : selectedFeature ? "auto" : "manual";
         const seekerDistanceMetres = haversineMetres(seeker, selectedPoint);
+        const measurementMethod = referenceMode === "auto"
+          ? "nearest edge from the built-in Central London water atlas"
+          : referenceMode === "reviewed"
+            ? "player-reviewed nearest edge from the built-in Central London water atlas"
+            : "exact player-selected nearest water edge";
         return {
           enabled: true,
           type: config.type,
@@ -2544,17 +2683,22 @@ class HideLineApp {
           seeker,
           category: "water",
           boundaryOnly: true,
+          // This remains null intentionally: every candidate location must be
+          // compared with its own nearest valid water body, not necessarily
+          // the same named water nearest to the seeker.
           referenceFeatureId: null,
+          selectedWaterFeatureId: selectedFeature?.id || null,
           referenceFeatureName: selectedName || "Selected nearest water edge",
           referenceCategory: "water",
           referencePoint: selectedPoint,
-          referenceGeometry: null,
-          referenceSource: "Player-selected map edge",
+          referenceGeometry: selectedFeature?.geometry || null,
+          referenceSource: selectedFeature?.source || (referenceMode === "manual" ? "Player-selected map edge" : "HideLine built-in water-edge atlas"),
           seekerDistanceMetres,
-          measurementMethod: "exact player-selected nearest water edge",
+          measurementMethod,
           manualReference: true,
-          waterWorkflowVersion: 2,
-          referenceSummary: `${selectedName || "Selected water edge"} · ${Math.round(seekerDistanceMetres)} m from the seeker pin`
+          waterReferenceMode: referenceMode,
+          waterWorkflowVersion: 3,
+          referenceSummary: `${selectedName || "Selected water edge"} · ${Math.round(seekerDistanceMetres)} m from the seeker pin · ${measurementMethod}`
         };
       }
       const reference = categoryFeatures.length

@@ -71,17 +71,20 @@ const THAMES_CONTROL_POINTS = Object.freeze([
   { lat: 51.50680, lng: -0.08200, halfWidthMetres: 128 },
   { lat: 51.50555, lng: -0.07528, halfWidthMetres: 136 }, // Tower Bridge
 
-  // Wapping and the Rotherhithe bend.
-  { lat: 51.50450, lng: -0.07100, halfWidthMetres: 142 },
-  { lat: 51.50340, lng: -0.06600, halfWidthMetres: 150 },
-  { lat: 51.50180, lng: -0.06050, halfWidthMetres: 158 },
-  { lat: 51.50030, lng: -0.05500, halfWidthMetres: 166 },
-  { lat: 51.49920, lng: -0.04900, halfWidthMetres: 174 },
-  { lat: 51.49870, lng: -0.04300, halfWidthMetres: 180 },
-  { lat: 51.49880, lng: -0.03700, halfWidthMetres: 184 },
-  { lat: 51.49960, lng: -0.03150, halfWidthMetres: 188 },
-  { lat: 51.50100, lng: -0.02700, halfWidthMetres: 192 },
-  { lat: 51.50220, lng: -0.02400, halfWidthMetres: 196 }
+  // Lower Pool along Wapping, then the north edge of the Rotherhithe
+  // peninsula towards Cuckold's Point. The earlier guide cut diagonally
+  // through Rotherhithe land; these anchors keep the river in the actual
+  // west-to-east reach before it turns south around the Isle of Dogs.
+  { lat: 51.50475, lng: -0.07100, halfWidthMetres: 142 },
+  { lat: 51.50485, lng: -0.06600, halfWidthMetres: 148 },
+  { lat: 51.50505, lng: -0.06050, halfWidthMetres: 154 },
+  { lat: 51.50535, lng: -0.05500, halfWidthMetres: 160 },
+  { lat: 51.50515, lng: -0.04900, halfWidthMetres: 168 },
+  { lat: 51.50475, lng: -0.04300, halfWidthMetres: 174 },
+  { lat: 51.50410, lng: -0.03700, halfWidthMetres: 180 },
+  { lat: 51.50315, lng: -0.03150, halfWidthMetres: 186 },
+  { lat: 51.50220, lng: -0.02700, halfWidthMetres: 192 },
+  { lat: 51.50155, lng: -0.02400, halfWidthMetres: 196 }
 ]);
 
 function segmentDistanceMetres(a, b) {

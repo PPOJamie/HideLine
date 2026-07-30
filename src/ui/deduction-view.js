@@ -15,6 +15,7 @@ import {
 } from "../core/deduction.js";
 import { mergeSpatialData, normaliseSpatialData, spatialCategoryLabel, spatialDataStats } from "../core/spatial.js";
 import { STATION_GEO_BY_ID } from "../data/station-geo.js";
+import { BUILT_IN_WATER_DATA } from "../data/water-edges.js";
 import { STATIONS, STATION_BY_ID, stationNameLength } from "../data/stations.js";
 import { icon } from "./icons.js";
 
@@ -31,7 +32,7 @@ export function buildDeductionViewModel(state) {
   }
 
   const importedSpatialData = normaliseSpatialData(state.privateTeamState?.spatialData);
-  const spatialData = mergeSpatialData(importedSpatialData, state.referenceData);
+  const spatialData = mergeSpatialData(BUILT_IN_WATER_DATA, importedSpatialData, state.referenceData);
   const allAutomatic = deriveAutomaticConstraints({
     questions: state.questions,
     team: state.profile.team,

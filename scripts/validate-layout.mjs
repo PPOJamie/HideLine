@@ -20,6 +20,7 @@ assert(worker.includes(`./src/app.js?v=${APP_VERSION}`), "The service worker mus
 assert(worker.includes("./src/core/notifications.js"), "The service worker must cache the notifications module.");
 assert(worker.includes("./src/core/question-location.js"), "The service worker must cache the question-location module.");
 assert(worker.includes("./src/services/reference-data.js"), "The service worker must cache the official boundary loader.");
+assert(worker.includes("./src/data/water-edges.js"), "The service worker must cache the built-in water-edge atlas.");
 
 const requiredFiles = [
   "src/app.js",
@@ -31,7 +32,8 @@ const requiredFiles = [
   "src/ui/modals.js",
   "src/ui/shell.js",
   "src/services/supabase.js",
-  "src/services/reference-data.js"
+  "src/services/reference-data.js",
+  "src/data/water-edges.js"
 ];
 for (const relative of requiredFiles) {
   try { await access(resolve(root, relative)); }

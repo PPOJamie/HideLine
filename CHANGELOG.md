@@ -2,6 +2,18 @@
 
 All notable changes to HideLine are documented here.
 
+## 2.3.3 — Built-in water atlas and mobile picker repair
+
+- Moved the coordinate-picker confirmation controls into a separate always-visible footer so the Leaflet map can no longer trap the page above **Use this water edge** on mobile.
+- Added viewport-height fallbacks, safe-area padding and small-screen button layouts for browser and installed-PWA use.
+- Added a bundled 36-feature Central London water-edge atlas covering the River Thames, canals, docks, basins and major named park lakes used by the game.
+- Automatically selects each player's nearest valid mapped bank or shoreline after their location is chosen, with an optional map review and manual override.
+- Enabled Body of Water Find Hiders shading without requiring imported water polygons: every candidate point is compared with its own nearest atlas edge.
+- Prevented same-named point placemarks from replacing usable built-in shoreline geometry during map-data merging.
+- Corrected the eastern River Thames planning guide around Wapping and Rotherhithe so Canada Water lake is no longer confused with the river.
+- Added offline vector rendering for the complete bundled water atlas and expanded water/picker validation and regression coverage.
+- Bumped the PWA shell and deployment guard to 2.3.3. No Supabase migration is required.
+
 ## 2.3.2 — Map-only Body of Water workflow
 
 - Removed the Body of Water place-name dropdown completely. Water names are now optional audit text and are never used to choose a reference automatically.

@@ -153,8 +153,8 @@ export function normaliseSpatialFeature(feature, index = 0) {
   if (!feature?.geometry?.type) return null;
   const properties = feature.properties || {};
   const name = String(properties.name || properties.Name || feature.name || `Feature ${index + 1}`).trim();
-  const layer = String(properties.layer || properties.folder || properties.categoryName || "").trim();
-  const category = String(properties.category || inferSpatialCategory(layer, name, properties.description || "")).trim() || "unknown";
+  const layer = String(properties.layer || feature.layer || properties.folder || properties.categoryName || "").trim();
+  const category = String(properties.category || feature.category || inferSpatialCategory(layer, name, properties.description || "")).trim() || "unknown";
   const id = String(feature.id || properties.id || `${category}:${normaliseSpatialName(name) || "feature"}:${index}`);
   const bbox = feature.bbox && feature.bbox.length >= 4
     ? { west: Number(feature.bbox[0]), south: Number(feature.bbox[1]), east: Number(feature.bbox[2]), north: Number(feature.bbox[3]) }
@@ -198,6 +198,12 @@ export function mergeSpatialData(...values) {
     if (data.importedAt && (!importedAt || new Date(data.importedAt) > new Date(importedAt))) importedAt = data.importedAt;
     for (const feature of data.features) {
       const key = `${feature.category}:${normaliseSpatialName(feature.name) || feature.id}`;
+      const existing = merged.get(key);
+      // Preserve a usable built-in water line or polygon when a later import
+      // contains only a same-named point placemark. A point such as a map pin
+      // cannot represent the shoreline required by the handbook and must not
+      // disable Find Hiders water shading.
+      if (feature.category === "water" && existing && isUsableWaterFeature(existing) && !isUsableWaterFeature(feature)) continue;
       merged.set(key, feature);
     }
   }
