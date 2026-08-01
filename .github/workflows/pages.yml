@@ -36,7 +36,7 @@ jobs:
         with:
           node-version: 22
       - name: Restore last verified map snapshots
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: data
           key: hideline-map-data-${{ github.run_id }}
